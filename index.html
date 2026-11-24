@@ -1,0 +1,2908 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>3D 64导联脑电与皮层定位交互图谱 · 64-Channel EEG Atlas</title>
+  <meta name="description" content="基于 Three.js 的交互式 3D 64 导联（国际 10-10 / 10-20 系统）脑电与大脑皮层定位图谱，支持查看皮层解剖投射、典型 ERP 成分、脑电节律、功能网络筛选与高清 PNG 导出。" />
+  <meta name="keywords" content="EEG, 64-channel, 10-10 system, 10-20 system, 脑电图谱, ERP, P300, SSVEP, BCI, 脑机接口, 大脑皮层定位, Three.js" />
+  <meta name="author" content="Hollis-Cao" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="3D 64导联脑电与皮层定位交互图谱 · 64-Channel EEG Atlas" />
+  <meta property="og:description" content="交互式 3D 64 导联国际 10-10 脑电图谱：点击电极查看皮层投射、对侧同源对称、ERP 成分与 BCI 应用。" />
+  <meta property="og:url" content="https://hollis-cao.github.io/eeg-64ch-atlas/" />
+  <meta name="twitter:card" content="summary" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230b1120'/%3E%3Ccircle cx='32' cy='32' r='20' fill='none' stroke='%2322d3ee' stroke-width='3'/%3E%3Ccircle cx='32' cy='22' r='3.5' fill='%2322d3ee'/%3E%3Ccircle cx='22' cy='34' r='3.5' fill='%23a855f7'/%3E%3Ccircle cx='42' cy='34' r='3.5' fill='%23a855f7'/%3E%3Ccircle cx='32' cy='44' r='3.5' fill='%2338bdf8'/%3E%3C/svg%3E" />
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts: Inter & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+  <!-- Three.js & OrbitControls (r128) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <script>
+    if (typeof tailwind !== 'undefined') {
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'PingFang SC', 'Microsoft YaHei', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+          },
+        },
+      };
+    }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at 42% 48%, #152238 0%, #0b1120 62%, #060a14 100%);
+      color: #f1f5f9;
+      user-select: none;
+    }
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+    #labels-layer {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 5;
+    }
+    .eeg-label {
+      position: absolute;
+      left: 0;
+      top: 0;
+      will-change: transform, opacity;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: rgba(15, 23, 42, 0.72);
+      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+      backdrop-filter: blur(4px);
+      white-space: nowrap;
+      pointer-events: auto;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    }
+    .eeg-label:hover {
+      background: rgba(34, 211, 238, 0.25);
+      border-color: #22d3ee;
+      color: #ffffff;
+      z-index: 40 !important;
+    }
+    .eeg-label.is-selected {
+      background: linear-gradient(135deg, #06b6d4, #0284c7);
+      color: #ffffff;
+      border-color: #a5f3fc;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 7px;
+      box-shadow: 0 0 14px rgba(34, 211, 238, 0.75);
+      z-index: 50 !important;
+    }
+    .eeg-label.is-paired {
+      background: rgba(139, 92, 246, 0.85);
+      color: #f5f3ff;
+      border-color: #ddd6fe;
+      font-weight: 700;
+      box-shadow: 0 0 10px rgba(167, 139, 250, 0.6);
+      z-index: 45 !important;
+    }
+    .eeg-label.is-filtered {
+      background: rgba(16, 185, 129, 0.28);
+      border-color: rgba(52, 211, 153, 0.7);
+      color: #ecfdf5;
+    }
+    .side-badge {
+      position: absolute;
+      left: 0;
+      top: 0;
+      will-change: transform;
+      pointer-events: none;
+    }
+    .wm-callout {
+      position: absolute;
+      left: 0;
+      top: 0;
+      will-change: transform, opacity;
+      pointer-events: auto;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.84);
+      border: 1px solid rgba(251, 191, 36, 0.55);
+      color: #fef3c7;
+      font-size: 11px;
+      line-height: 1.2;
+      white-space: nowrap;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 0 12px rgba(245, 158, 11, 0.22);
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .wm-callout:hover {
+      background: rgba(245, 158, 11, 0.28);
+      border-color: #fde68a;
+      color: #ffffff;
+      z-index: 60 !important;
+    }
+    .wm-callout-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #fbbf24;
+      box-shadow: 0 0 8px #f59e0b;
+      flex-shrink: 0;
+    }
+    .glass-panel {
+      background: rgba(13, 20, 36, 0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      box-shadow: 0 20px 45px -15px rgba(0, 0, 0, 0.65);
+    }
+    /* Custom sleek scrollbar */
+    .custom-scroll::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    .custom-scroll::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.3);
+    }
+    .custom-scroll::-webkit-scrollbar-thumb {
+      background: rgba(100, 116, 139, 0.45);
+      border-radius: 9999px;
+    }
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+      background: rgba(148, 163, 184, 0.7);
+    }
+    /* Range slider styling */
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      background: rgba(51, 65, 85, 0.8);
+      height: 5px;
+      border-radius: 999px;
+      outline: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #22d3ee;
+      cursor: pointer;
+      border: 2px solid #0f172a;
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.7);
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #22d3ee;
+      cursor: pointer;
+      border: 2px solid #0f172a;
+      box-shadow: 0 0 8px rgba(34, 211, 238, 0.7);
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 3D WebGL Viewport -->
+  <div id="canvas-container"></div>
+
+  <!-- 2D Projected Electrode Labels -->
+  <div id="labels-layer"></div>
+
+  <!-- CDN / WebGL Fallback Banner (Hidden unless error) -->
+  <div id="webgl-fallback" class="hidden fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/95">
+    <div class="glass-panel rounded-2xl p-6 max-w-md text-center space-y-3 border border-rose-500/40">
+      <div class="text-rose-400 font-bold text-base">无法初始化 3D 脑电视图</div>
+      <p id="webgl-fallback-msg" class="text-xs text-slate-300 leading-relaxed">
+        请检查网络连接（需加载 Three.js）或确认浏览器已开启 WebGL 硬件加速。
+      </p>
+    </div>
+  </div>
+
+  <!-- Top Header & Functional Filter Bar -->
+  <header class="fixed top-0 left-0 right-0 z-20 pointer-events-none p-3 sm:p-4 flex flex-col gap-2.5 lg:pr-[420px]">
+    <!-- Top Row: Title, Search, Export -->
+    <div class="flex flex-wrap items-center justify-between gap-2 pointer-events-auto">
+      <div class="glass-panel rounded-xl px-3.5 py-2 flex items-center gap-3">
+        <div class="w-8 h-8 rounded-lg bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-400 shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3c-4.97 0-9 3.58-9 8 0 2.76 1.57 5.2 3.96 6.64.38.23.62.64.62 1.09V20a1 1 0 001 1h6.84a1 1 0 001-1v-1.27c0-.45.24-.86.62-1.09C19.43 16.2 21 13.76 21 11c0-4.42-4.03-8-9-8z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 10h.01M15 10h.01M12 7v6M9.5 13.5c1.5 1 3.5 1 5 0" />
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-sm sm:text-base font-bold tracking-tight text-slate-100 leading-tight">
+            3D 64导联脑电与皮层定位图谱
+          </h1>
+          <p class="text-[11px] text-slate-400 hidden sm:block">
+            International 10-10 System · 点击电极查看ERP成分、认知功能与皮层投射
+          </p>
+        </div>
+      </div>
+
+      <!-- Search & PNG Export -->
+      <div class="flex items-center gap-2">
+        <div class="relative">
+          <input
+            id="electrode-search"
+            type="text"
+            placeholder="搜索导联/ERP (P3, N170, SSVEP)..."
+            autocomplete="off"
+            aria-label="搜索电极或ERP成分"
+            class="glass-panel rounded-xl pl-8 pr-7 py-2 text-xs sm:text-sm text-slate-100 placeholder-slate-400 w-48 sm:w-64 focus:outline-none focus:border-cyan-400/60 transition"
+          />
+          <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="M21 21l-4.35-4.35"></path>
+          </svg>
+          <kbd class="hidden sm:inline-block absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-500 border border-slate-700 rounded px-1 pointer-events-none">/</kbd>
+          <!-- Search Dropdown -->
+          <div id="search-results" class="hidden absolute left-0 right-0 mt-1.5 glass-panel rounded-xl max-h-64 overflow-y-auto custom-scroll z-50 divide-y divide-slate-800"></div>
+        </div>
+
+        <button
+          id="btn-export-png"
+          title="导出带电极标注的高清图谱 PNG"
+          class="glass-panel hover:bg-cyan-500/20 hover:border-cyan-400/50 active:scale-95 text-slate-100 rounded-xl px-3 py-2 text-xs font-medium flex items-center gap-1.5 transition cursor-pointer"
+        >
+          <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+          </svg>
+          <span class="hidden sm:inline">导出高清图</span>
+        </button>
+
+        <a
+          href="https://github.com/Hollis-Cao/eeg-64ch-atlas"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="查看 GitHub 源码仓库"
+          aria-label="GitHub Repository"
+          class="glass-panel hover:bg-slate-700/60 hover:border-slate-500/60 text-slate-200 rounded-xl p-2 flex items-center justify-center transition"
+        >
+          <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+            <path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Second Row: Functional Network Filter Pills -->
+    <div class="pointer-events-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5" id="network-filters">
+      <button data-net="all" class="net-btn active px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 whitespace-nowrap transition cursor-pointer">
+        全部 64 导联 (All)
+      </button>
+      <button data-net="wm" class="net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-amber-200 border-amber-400/30 hover:text-white whitespace-nowrap transition cursor-pointer">
+        💡 认知与工作记忆 (Working Memory)
+      </button>
+      <button data-net="motor" class="net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-slate-300 hover:text-white whitespace-nowrap transition cursor-pointer">
+        🖐️ 运动想象与执行 (MI / ME)
+      </button>
+      <button data-net="spatial" class="net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-slate-300 hover:text-white whitespace-nowrap transition cursor-pointer">
+        🧭 空间定向与注意 (Spatial)
+      </button>
+      <button data-net="executive" class="net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-slate-300 hover:text-white whitespace-nowrap transition cursor-pointer">
+        🧠 执行控制与 P300
+      </button>
+      <button data-net="visual" class="net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-slate-300 hover:text-white whitespace-nowrap transition cursor-pointer">
+        👁️ 视觉与 SSVEP
+      </button>
+      <button data-net="language" class="net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-slate-300 hover:text-white whitespace-nowrap transition cursor-pointer">
+        🗣️ 语言与听觉 (Auditory)
+      </button>
+    </div>
+  </header>
+
+  <!-- Bottom-Left Camera & Display Control Dock -->
+  <aside class="fixed bottom-3 left-3 right-3 sm:right-auto z-20 pointer-events-none flex flex-col gap-2 max-w-md">
+    <!-- Mobile Drawer Toggle (Stacked cleanly above dock so it never overlaps) -->
+    <div class="lg:hidden flex justify-end pointer-events-none">
+      <button
+        id="mobile-inspector-toggle"
+        class="pointer-events-auto glass-panel rounded-full px-3.5 py-2 text-xs font-semibold text-cyan-300 border border-cyan-400/40 shadow-lg flex items-center gap-1.5 cursor-pointer"
+      >
+        <span id="mobile-toggle-badge" class="font-mono font-bold text-white bg-cyan-500/30 px-1.5 py-0.5 rounded">P3</span>
+        <span>导联详情</span>
+      </button>
+    </div>
+
+    <!-- Lobe Color Legend (Visible when Lobe Coloring is active) -->
+    <div id="lobe-legend" class="pointer-events-auto glass-panel rounded-xl px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-300">
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-[#38bdf8]"></span>额叶 Frontal</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-[#f59e0b]"></span>感觉运动区 SM1</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-[#a855f7]"></span>顶叶 Parietal</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-[#10b981]"></span>颞叶 Temporal</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-[#f43f5e]"></span>枕叶 Occipital</span>
+    </div>
+
+    <!-- Main View & Layer Controls -->
+    <div class="pointer-events-auto glass-panel rounded-2xl p-3 flex flex-col gap-2.5">
+      <!-- Camera View Presets -->
+      <div class="flex items-center justify-between gap-1">
+        <span class="text-[11px] font-medium text-slate-400 mr-1 shrink-0">视角:</span>
+        <div class="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          <button data-view="top" title="快捷键 1" class="view-btn px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-200 border border-slate-700/70 transition cursor-pointer">俯视</button>
+          <button data-view="left" title="快捷键 2" class="view-btn px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-200 border border-slate-700/70 transition cursor-pointer">左侧</button>
+          <button data-view="right" title="快捷键 3" class="view-btn px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-200 border border-slate-700/70 transition cursor-pointer">右侧</button>
+          <button data-view="front" title="快捷键 4" class="view-btn px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-200 border border-slate-700/70 transition cursor-pointer">前额</button>
+          <button data-view="back" title="快捷键 5" class="view-btn px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-200 border border-slate-700/70 transition cursor-pointer">后枕</button>
+          <button id="btn-autorotate" title="快捷键 Space" class="px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-300 border border-slate-700/70 transition cursor-pointer">旋转</button>
+        </div>
+      </div>
+
+      <!-- Sliders & Toggles -->
+      <div class="grid grid-cols-3 sm:flex sm:items-center gap-2 pt-1 border-t border-slate-800/80 text-[11px]">
+        <label class="flex items-center gap-2 text-slate-300 col-span-3 sm:flex-1">
+          <span class="shrink-0 text-slate-400">头模透明</span>
+          <input id="scalp-opacity" type="range" min="0" max="0.55" step="0.02" value="0.22" class="w-full" />
+        </label>
+
+        <button id="btn-wm-callouts" class="px-2 py-1.5 rounded-lg font-medium bg-amber-500/20 text-amber-200 border border-amber-400/40 hover:bg-amber-500/30 transition cursor-pointer text-center whitespace-nowrap">
+          认知标注: 开
+        </button>
+
+        <button id="btn-lobe-color" class="px-2 py-1.5 rounded-lg font-medium bg-purple-500/20 text-purple-200 border border-purple-400/40 hover:bg-purple-500/30 transition cursor-pointer text-center whitespace-nowrap">
+          脑叶分区: 开
+        </button>
+
+        <button id="btn-label-mode" class="px-2 py-1.5 rounded-lg font-medium bg-slate-800/90 text-slate-200 border border-slate-700 hover:border-slate-500 transition cursor-pointer text-center whitespace-nowrap">
+          标签: 全部
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Right Glassmorphic Neuroscience & ERP Inspector Panel -->
+  <section
+    id="inspector-panel"
+    class="fixed top-0 right-0 bottom-0 w-full sm:w-[400px] z-30 glass-panel border-l border-slate-700/50 flex flex-col transition-transform duration-300 translate-y-full lg:translate-y-0"
+  >
+    <!-- Inspector Top Header -->
+    <div class="p-4 border-b border-slate-800/90 flex items-start justify-between gap-3 shrink-0">
+      <div class="flex items-center gap-3">
+        <div id="insp-badge" class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center font-mono text-xl font-bold text-white shadow-lg shadow-cyan-500/25 shrink-0">
+          P3
+        </div>
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span id="insp-lobe" class="text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-400/30">
+              顶叶 (Parietal Lobe)
+            </span>
+            <span id="insp-hemisphere" class="text-[11px] text-slate-400">左半球 · 10-20 核心导联</span>
+          </div>
+          <h2 id="insp-title" class="text-sm font-bold text-slate-100 mt-1">
+            左侧顶上/顶下小叶
+          </h2>
+        </div>
+      </div>
+
+      <!-- Close button for mobile -->
+      <button id="close-inspector-mobile" aria-label="关闭详情面板" class="lg:hidden p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+      </button>
+    </div>
+
+    <!-- Contralateral Homologous Pair Quick-Jump Bar -->
+    <div id="pair-bar" class="px-4 py-2 bg-slate-900/60 border-b border-slate-800/80 flex items-center justify-between text-xs shrink-0">
+      <span class="text-slate-400 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+        <span id="pair-label-text">对侧同源对称电极 (Contralateral Pair)</span>
+      </span>
+      <button id="btn-jump-pair" class="font-mono font-semibold px-2.5 py-0.5 rounded-md bg-purple-500/20 hover:bg-purple-500/35 text-purple-200 border border-purple-400/40 transition cursor-pointer">
+        切换至 P4 ⇄
+      </button>
+    </div>
+
+    <!-- Scrollable Neuroscience Details -->
+    <div id="inspector-scroll" class="flex-1 overflow-y-auto custom-scroll p-4 space-y-4">
+      <!-- Anatomical Location -->
+      <div class="rounded-xl bg-slate-900/65 border border-slate-800 p-3">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
+          <span>📍 皮层解剖定位 (Cortical Anatomy)</span>
+          <span id="insp-coords" class="font-mono text-[10px] text-cyan-400">θ=44°, φ=-141°</span>
+        </div>
+        <p id="insp-anatomy" class="text-xs text-slate-200 leading-relaxed"></p>
+      </div>
+
+      <!-- Core Cognitive & Neural Functions -->
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
+          🧩 核心认知与神经功能 (Functions)
+        </div>
+        <div id="insp-tags" class="flex flex-wrap gap-1.5 mb-2.5"></div>
+        <p id="insp-summary" class="text-xs text-slate-300 leading-relaxed bg-slate-900/45 rounded-xl p-3 border border-slate-800/80"></p>
+      </div>
+
+      <!-- Classic ERP Components & Neural Oscillations -->
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400 mb-2">
+          ⚡ 典型 ERP 成分与脑电节律 (ERP & Oscillations)
+        </div>
+        <div id="insp-erps" class="space-y-2"></div>
+      </div>
+
+      <!-- BCI & Clinical Applications -->
+      <div class="rounded-xl bg-gradient-to-br from-cyan-950/40 to-slate-900/80 border border-cyan-500/25 p-3">
+        <div class="text-[11px] font-semibold uppercase tracking-wider text-cyan-300 mb-1">
+          🤖 脑机接口与临床研究应用 (BCI & Clinical)
+        </div>
+        <p id="insp-bci" class="text-xs text-slate-200 leading-relaxed"></p>
+      </div>
+    </div>
+
+    <!-- Footer Quick-Select Landmark Electrodes -->
+    <div class="p-3 border-t border-slate-800/90 bg-slate-950/60 shrink-0">
+      <div class="text-[10px] text-slate-400 mb-1.5">常用经典导联快速切换:</div>
+      <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar" id="quick-landmarks">
+        <!-- Populated via JS -->
+      </div>
+    </div>
+  </section>
+
+  <!-- Non-blocking Toast Notification -->
+  <div id="toast-msg" class="fixed top-20 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-opacity duration-300 glass-panel border-cyan-400/40 rounded-xl px-4 py-2 text-xs font-medium text-cyan-200 shadow-xl">
+    已导出高清图谱 PNG
+  </div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      // Defensive check for CDN / WebGL availability
+      if (typeof THREE === 'undefined' || typeof THREE.OrbitControls === 'undefined') {
+        document.getElementById('webgl-fallback').classList.remove('hidden');
+        return;
+      }
+
+      // =========================================================================
+      // 1. COMPLETE 64-CHANNEL INTERNATIONAL 10-10 ELECTRODE DATABASE
+      //    Right-handed anatomical coordinate convention:
+      //    +Z = Anterior (Nose), +Y = Superior (Cz),
+      //    +X = Anatomical Left (phi < 0), -X = Anatomical Right (phi > 0)
+      //    theta: polar angle from Cz zenith (0° = Cz, 90° = equator)
+      //    phi: azimuth in degrees (0° = Anterior/+Z, -90° = Left/+X, +90° = Right/-X, ±180° = Posterior/-Z)
+      // =========================================================================
+      const CORE_10_20_SET = new Set([
+        'Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8',
+        'T7', 'C3', 'Cz', 'C4', 'T8',
+        'P7', 'P3', 'Pz', 'P4', 'P8',
+        'O1', 'O2', 'M1', 'M2'
+      ]);
+
+      const LOBE_META = {
+        frontal:   { label: '额叶 (Frontal Lobe)', badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-400/30', color: 0x38bdf8 },
+        motor:     { label: '感觉运动区 (Sensorimotor)', badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-400/30', color: 0xf59e0b },
+        parietal:  { label: '顶叶 (Parietal Lobe)', badgeClass: 'bg-purple-500/20 text-purple-300 border-purple-400/30', color: 0xa855f7 },
+        temporal:  { label: '颞叶 (Temporal Lobe)', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30', color: 0x10b981 },
+        occipital: { label: '枕叶 (Occipital Lobe)', badgeClass: 'bg-rose-500/20 text-rose-300 border-rose-400/30', color: 0xf43f5e },
+      };
+
+      const ELECTRODES_DATA = [
+        // --- Prefrontal / Frontopolar (3) ---
+        {
+          id: 'Fp1', pair: 'Fp2', theta: 72, phi: -18, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '左侧眶额皮层与前额叶极 (Left Frontopolar & Orbitofrontal Cortex, BA 10 / 11)',
+          functions: ['决策与奖赏评估 (Decision & Reward)', '眼电伪迹监测 (EOG Artifact)', '情绪调节 (Emotion Regulation)'],
+          summary: '位于左眉弓上方前额极，反映眶额皮层与腹内侧前额叶的整合认知加工；同时由于紧邻眼球，在EEG预处理中是垂直/水平眼电（VEOG/HEOG）最敏感的参考监测通道。',
+          erps: [
+            { name: '眼电伪迹与慢波偏移 (VEOG / Slow Cortical Potential)', window: '全时程 / 眨眼瞬态', desc: '眨眼时呈现高幅正向电位偏转，常作为 ICA 独立成分分析剔除眼动伪迹的核心特征导联。' },
+            { name: '前额叶 N2 / 奖赏正波 (Reward Positivity)', window: '200 – 350 ms', desc: '参与不确定性决策、情绪效价评估与认知控制。' }
+          ],
+          bci: '混合型 BCI 中的眨眼/眼动意图开关检测、情绪识别 BCI、信号质量与眼电伪迹监控。'
+        },
+        {
+          id: 'Fpz', pair: null, theta: 72, phi: 0, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '内侧前额叶极 (Medial Frontopolar Cortex, BA 10)',
+          functions: ['自我参照加工 (Self-Referential)', '认知分支与多任务 (Cognitive Branching)', '前额基线参考 (Prefrontal Midline)'],
+          summary: '前额叶正中线导联，位于鼻根（Nasion）上方约20%处，对应内侧前额极（BA 10），参与高级目标维持、自我意识与双侧眼电对称监测。',
+          erps: [
+            { name: '前额慢负波 (Prefrontal CNV / SCP)', window: '500 – 1500 ms', desc: '反映对即将到来事件的前额叶预期与注意力唤醒水平。' },
+            { name: '对称垂直眼电特征 (Symmetric VEOG)', window: '眨眼瞬态', desc: '两侧眼球同步垂直运动时呈现高度对称的电位变化。' }
+          ],
+          bci: '神经反馈（Neurofeedback）注意力训练、前额叶疲劳与警觉度监测。'
+        },
+        {
+          id: 'Fp2', pair: 'Fp1', theta: 72, phi: 18, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '右侧眶额皮层与前额叶极 (Right Frontopolar & Orbitofrontal Cortex, BA 10 / 11)',
+          functions: ['行为抑制与风险规避 (Behavioral Inhibition)', '负性情绪与回避动机 (Withdrawal Motivation)', '眼电伪迹监测 (EOG)'],
+          summary: '位于右眉弓上方，右侧前额极在行为抑制、情绪效价偏侧化（右侧与回避/警觉相关）以及社会情绪评估中起重要作用，也是右侧眼电的核心监测点。',
+          erps: [
+            { name: 'NoGo-N2 前额抑制波', window: '200 – 320 ms', desc: '在需要抑制优势冲动反应的任务中呈现显著负向波幅。' },
+            { name: '前额 Alpha 不对称性 (Frontal Alpha Asymmetry)', window: '8 – 13 Hz', desc: '与 Fp1/F3 对比用于评估情绪趋近-回避动机平衡。' }
+          ],
+          bci: '情感脑机接口（Affective BCI）、认知负荷与驾驶员疲劳实时预警系统。'
+        },
+
+        // --- Anterior Frontal (5) ---
+        {
+          id: 'AF7', pair: 'AF8', theta: 68, phi: -36, lobeKey: 'frontal', networks: ['executive', 'language'],
+          cortex: '左侧腹外侧前额叶与眶额外侧部 (Left Ventrolateral PFC / Pars Orbitalis, BA 47 / 45)',
+          functions: ['语义检索与选择 (Semantic Retrieval)', '工作记忆干扰抑制 (Interference Suppression)', '眼周肌电/眼电监测'],
+          summary: '位于左前额外侧，下覆左侧腹外侧前额叶（VLPFC, BA 47），参与语义信息的受控检索与主动记忆干扰过滤。',
+          erps: [
+            { name: '左前额负波 (Left Anterior Negativity, LAN)', window: '300 – 500 ms', desc: '对句法结构异常与工作记忆句法负荷敏感。' },
+            { name: 'N200 认知控制成分', window: '200 – 300 ms', desc: '反映冲突检测与认知抑制过程。' }
+          ],
+          bci: '言语想象/语义解码辅助导联、抗眼电干扰空间滤波器构建。'
+        },
+        {
+          id: 'AF3', pair: 'AF4', theta: 56, phi: -24, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '左侧背外侧与前部前额叶 (Left Anterior/Dorsolateral PFC, BA 9 / 10 / 46)',
+          functions: ['工作记忆维持 (Working Memory Maintenance)', '执行规划 (Executive Planning)', '前额认知控制 (Cognitive Control)'],
+          summary: '位于左额前区，覆盖左侧背外侧前额叶前部，在言语工作记忆刷新、规则切换与目标导向行为中持续激活。',
+          erps: [
+            { name: '前额慢波 (Frontal Slow Wave, FSW)', window: '400 – 1000 ms', desc: '随工作记忆负载（如 N-back 难度）增加而呈现持续负向增强。' },
+            { name: '前额 Theta 同步化 (Frontal Midline Theta)', window: '4 – 7 Hz', desc: '高认知控制需求下 Theta 频段功率显著升高。' }
+          ],
+          bci: '工作记忆负荷实时评估、自适应人机交互系统（Passive BCI）。'
+        },
+        {
+          id: 'AFz', pair: null, theta: 54, phi: 0, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '内侧前额叶与前扣带回背侧投射区 (Medial PFC / Dorsal ACC, BA 9 / 32)',
+          functions: ['认知冲突监控 (Conflict Monitoring)', '持续性注意维持 (Sustained Attention)', '自我调节 (Self-Regulation)'],
+          summary: '位于 Fpz 与 Fz 之间的前额正中线，是捕获前额中线 Theta 振荡与冲突监控信号的理想位置之一。',
+          erps: [
+            { name: 'N200 冲突监控波 (Conflict N2)', window: '200 – 350 ms', desc: '在 Stroop、Flanker 冲突试次中诱发显著负波。' },
+            { name: '前额 Theta 节律 (Frontal Theta)', window: '4 – 8 Hz', desc: '反映内侧前额叶-前扣带回网络在专注与认知努力时的节律性活动。' }
+          ],
+          bci: '注意力集中度检测、认知工作负荷与精神疲劳监测。'
+        },
+        {
+          id: 'AF4', pair: 'AF3', theta: 56, phi: 24, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '右侧背外侧与前部前额叶 (Right Anterior/Dorsolateral PFC, BA 9 / 10 / 46)',
+          functions: ['空间工作记忆 (Spatial Working Memory)', '警觉与持续注意 (Vigilance)', '反应抑制 (Response Inhibition)'],
+          summary: '位于右额前区，右侧前额叶对空间工作记忆保持、警觉性维持以及抑制不恰当运动冲动具有优势作用。',
+          erps: [
+            { name: 'Stop-Signal / NoGo P3a', window: '300 – 450 ms', desc: '反映右侧前额抑制网络的激活与注意重定向。' },
+            { name: '右侧前额 Alpha/Beta 调制', window: '8 – 30 Hz', desc: '参与警觉状态维持与情绪调节。' }
+          ],
+          bci: '警觉度与注意力退化监测、情绪与压力状态解码。'
+        },
+        {
+          id: 'AF8', pair: 'AF7', theta: 68, phi: 36, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '右侧腹外侧前额叶与眶额外侧部 (Right Ventrolateral PFC, BA 47 / 45)',
+          functions: ['全局反应制动 (Motor/Cognitive Braking)', '新异刺激警觉 (Novelty Alerting)', '水平/垂直眼电参考'],
+          summary: '右前额外侧导联，下覆右侧腹外侧前额叶（rVLPFC），是人类大脑执行“紧急制动”（Stop-Signal 抑制）的关键皮层枢纽。',
+          erps: [
+            { name: '右侧额叶 N2 / Stop-N2', window: '180 – 280 ms', desc: '停止信号出现后迅速诱发，标记行为抑制启动。' },
+            { name: '前额 Beta 爆发 (Right Frontal Beta Burst)', window: '15 – 25 Hz', desc: '与运动或认知动作的快速取消密切相关。' }
+          ],
+          bci: '认知抑制状态监测、眼电伪迹空间分离。'
+        },
+
+        // --- Frontal Line (9) ---
+        {
+          id: 'F7', pair: 'F8', theta: 72, phi: -54, lobeKey: 'frontal', networks: ['language', 'executive'],
+          cortex: '左侧额下回 / 布洛卡区 (Left Inferior Frontal Gyrus / Broca’s Area, BA 44 / 45)',
+          functions: ['言语产生与句法加工 (Speech Production & Syntax)', '语音工作记忆 (Phonological Loop)', '语义选择 (Semantic Selection)'],
+          summary: '标准 10-20 经典导联，直接覆盖左侧额下回（Broca 区），是语言产生、句法结构解析及默读/内部言语想象（Covert Speech）的核心记录点。',
+          erps: [
+            { name: '左前额负波 (LAN / ELAN)', window: '150 – 500 ms', desc: '对词类错误与句法结构违例产生特征性左前额负向响应。' },
+            { name: '言语准备慢波 (Speech Readiness Potential)', window: '-600 – 0 ms', desc: '在发声或默读想象前于左侧 Broca 区逐步累积负电位。' }
+          ],
+          bci: '无声言语脑机接口（Silent/Covert Speech BCI）、失语症康复评估。'
+        },
+        {
+          id: 'F5', pair: 'F6', theta: 58, phi: -48, lobeKey: 'frontal', networks: ['language', 'executive'],
+          cortex: '左侧额中回下部与额下回背侧 (Left Dorsolateral/Inferior PFC, BA 45 / 46)',
+          functions: ['词汇-语义控制 (Lexical-Semantic Control)', '工作记忆操作 (WM Manipulation)', '语音编码 (Phonological Encoding)'],
+          summary: '连接左侧背外侧前额叶与 Broca 区的过渡导联，协同参与复杂语言加工与执行工作记忆的信息重组。',
+          erps: [
+            { name: '前额 N400 语义控制成分', window: '300 – 500 ms', desc: '在多义词消歧或高语义冲突条件下波幅增强。' },
+            { name: 'Alpha/Beta 功率抑制', window: '8 – 30 Hz', desc: '默读与语言生成任务中呈现左侧偏侧化去同步。' }
+          ],
+          bci: '高密度语言解码阵列、认知控制负荷评估。'
+        },
+        {
+          id: 'F3', pair: 'F4', theta: 44, phi: -39, lobeKey: 'frontal', networks: ['executive', 'motor'],
+          cortex: '左侧背外侧前额叶与前运动皮层前部 (Left DLPFC / Rostral Premotor, BA 8 / 9 / 46)',
+          functions: ['执行功能与工作记忆 (Executive Function & WM)', '正向趋近情绪 (Approach Motivation)', '运动序列规划 (Motor Sequence Planning)'],
+          summary: '10-20 系统核心额叶导联，下覆左侧背外侧前额叶（DLPFC），是认知控制、工作记忆刷新、动作序列高层规划以及前额 Alpha 不对称性（情绪/抑郁评估）的关键位点。',
+          erps: [
+            { name: 'P3a 新异刺激定向波 (Novelty P3a)', window: '250 – 380 ms', desc: '由意外、新异或突兀事件引发的前额注意捕获正波。' },
+            { name: '前额 Alpha 不对称性 (FAA: ln F4 - ln F3)', window: '8 – 13 Hz', desc: '经典情感神经科学指标，反映趋近动机与积极情绪状态。' }
+          ],
+          bci: '情绪状态与抑郁症辅助评估（FAA）、工作记忆脑机接口、运动前规划解码。'
+        },
+        {
+          id: 'F1', pair: 'F2', theta: 37, phi: -20, lobeKey: 'frontal', networks: ['executive', 'motor'],
+          cortex: '左侧额上回与前辅助运动区 (Left Superior Frontal Gyrus / Pre-SMA, BA 6 / 8)',
+          functions: ['内源性动作发起 (Self-Initiated Action)', '注意定向控制 (Top-Down Attention)', '认知任务切换 (Task Switching)'],
+          summary: '位于左额上回，靠近前辅助运动区（Pre-SMA）与额叶眼动区（FEF），参与自发动作序列的决策发起与自上而下的注意分配。',
+          erps: [
+            { name: '早期伴随负变 (Early CNV)', window: '500 – 1200 ms', desc: '提示信号出现后反映额叶对后续目标刺激的定向准备。' },
+            { name: '前额中线 Theta 扩展 (Frontal Theta)', window: '4 – 7 Hz', desc: '在任务规则切换与工作记忆更新时增强。' }
+          ],
+          bci: '自发运动意图预测、多任务认知负荷解码。'
+        },
+        {
+          id: 'Fz', pair: null, theta: 36, phi: 0, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '内侧额上回与前扣带回皮层 (Medial Superior Frontal Gyrus / ACC, BA 6 / 8 / 32)',
+          functions: ['执行控制与冲突监控 (Executive Control)', '注意定向与新异检测 (Orienting / P3a)', '工作记忆中枢 (Central Executive)'],
+          summary: '10-20 额中线核心导联，是记录**前额中线 Theta（Fmθ）**、**P3a** 及**失匹配负波（MMN）**额叶成分的黄金位点，反映前扣带回（ACC）与内侧前额叶的认知控制枢纽活动。',
+          erps: [
+            { name: 'P3a 定向反射波 (Orienting P3a)', window: '250 – 350 ms', desc: '新异刺激自动捕获额叶注意资源时在 Fz 达到波幅峰值。' },
+            { name: '失匹配负波 (MMN) 与 N2b', window: '150 – 250 ms', desc: '听觉或视觉规律被打破时产生前额-中央分布负波，无需主动注意即可诱发。' },
+            { name: '前额中线 Theta 振荡 (Fmθ)', window: '4 – 7 Hz', desc: '心算、N-back 工作记忆与专注状态下高度稳定的节律标志。' }
+          ],
+          bci: 'P300 拼写器核心中线导联、认知负荷与专注度监测、意识障碍（MMN）临床评估。'
+        },
+        {
+          id: 'F2', pair: 'F1', theta: 37, phi: 20, lobeKey: 'frontal', networks: ['executive', 'motor'],
+          cortex: '右侧额上回与前辅助运动区 (Right Superior Frontal Gyrus / Pre-SMA, BA 6 / 8)',
+          functions: ['空间注意启动 (Spatial Attention Initiation)', '反应抑制控制 (Inhibitory Control)', '动作序列定时 (Motor Timing)'],
+          summary: '右侧额上回导联，与右半球背侧注意网络（FEF）及 Pre-SMA 协同，参与空间注意转向与动作节律控制。',
+          erps: [
+            { name: '伴随负变 (CNV)', window: '500 – 1500 ms', desc: '反映运动前准备与时间预期。' },
+            { name: 'NoGo-P3 抑制成分', window: '300 – 500 ms', desc: '在反应抑制任务中呈现明显正向波幅。' }
+          ],
+          bci: '混合注意-运动 BCI、认知控制与警觉度评估。'
+        },
+        {
+          id: 'F4', pair: 'F3', theta: 44, phi: 39, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '右侧背外侧前额叶 (Right Dorsolateral Prefrontal Cortex, BA 8 / 9 / 46)',
+          functions: ['持续警觉与监控 (Sustained Vigilance)', '空间工作记忆 (Spatial Working Memory)', '抑制控制与回避情绪 (Inhibition)'],
+          summary: '10-20 系统核心右额叶导联，下覆右侧背外侧前额叶（rDLPFC），主导持续性注意监控、空间工作记忆维持以及行为抑制。',
+          erps: [
+            { name: 'NoGo-N2 / P3 抑制复合波', window: '200 – 450 ms', desc: '在 Go/NoGo 任务中反映右侧前额叶对运动冲动的抑制。' },
+            { name: '前额 Alpha 不对称性 (FAA)', window: '8 – 13 Hz', desc: '右侧前额 Alpha 相对降低常与警觉增强或回避动机相关。' }
+          ],
+          bci: '情感脑机接口、注意力与疲劳监测、经颅磁刺激（rTMS）临床定位参考。'
+        },
+        {
+          id: 'F6', pair: 'F5', theta: 58, phi: 48, lobeKey: 'frontal', networks: ['executive'],
+          cortex: '右侧额中回下部与额下回背侧 (Right Dorsolateral/Inferior PFC, BA 45 / 46)',
+          functions: ['非言语工作记忆 (Non-Verbal WM)', '冲突解决 (Conflict Resolution)', '韵律与情绪语调 (Prosody)'],
+          summary: '位于右侧额叶外侧，参与视觉空间工作记忆刷新、规则抑制以及语音情绪韵律（Prosody）的加工。',
+          erps: [
+            { name: '右前额 N200', window: '200 – 300 ms', desc: '反映注意力转移与冲突抑制。' },
+            { name: 'Beta 振荡调制', window: '13 – 30 Hz', desc: '在执行抑制和认知切换时呈现特征性功率变化。' }
+          ],
+          bci: '多通道认知状态解码与前额叶功能连通性分析。'
+        },
+        {
+          id: 'F8', pair: 'F7', theta: 72, phi: 54, lobeKey: 'frontal', networks: ['executive', 'language'],
+          cortex: '右侧额下回 (Right Inferior Frontal Gyrus, BA 44 / 45)',
+          functions: ['运动与认知制动 (Motor Braking / Stopping)', '语调与情感韵律理解 (Emotional Prosody)', '水平眼电参照 (HEOG)'],
+          summary: '10-20 经典右前额导联，下覆右侧额下回（rIFG），是执行反应抑制（停止正在进行的动作）与理解言语情感语调的关键脑区。',
+          erps: [
+            { name: 'Stop-Signal P3 / N2', window: '200 – 400 ms', desc: '对停止指令做出快速反应，标记右侧额叶制动通路激活。' },
+            { name: '水平眼电特征 (HEOG)', window: '水平扫视瞬态', desc: '与 F7 构成经典的水平眼电双极导联（F7 - F8），精确追踪左右眼球扫视（Saccades）。' }
+          ],
+          bci: '眼动扫视检测（Saccade Rejection）、抑制控制脑机接口。'
+        },
+
+        // --- Frontocentral Line (9) ---
+        {
+          id: 'FT7', pair: 'FT8', theta: 72, phi: -72, lobeKey: 'temporal', networks: ['language'],
+          cortex: '左侧前颞叶与额下回岛盖部 (Left Anterior Temporal / Frontal Operculum, BA 38 / 44)',
+          functions: ['早期句法构建 (Early Syntactic Building)', '语音与语义整合 (Audio-Semantic Integration)', '颞前肌电监测'],
+          summary: '位于左额颞交界处，连接 Broca 区与前颞叶语言网络，参与听觉句子结构的快速在线构建。',
+          erps: [
+            { name: '早期左前额负波 (ELAN)', window: '120 – 200 ms', desc: '听觉或阅读中遇到词性结构违例时出现极早期左额颞负波。' },
+            { name: '听觉 N100', window: '80 – 120 ms', desc: '反映初级/次级听觉皮层对声音起止的快速编码。' }
+          ],
+          bci: '听觉语言理解 BCI、言语神经假体辅助通道。'
+        },
+        {
+          id: 'FC5', pair: 'FC6', theta: 56, phi: -68, lobeKey: 'motor', networks: ['motor', 'language'],
+          cortex: '左侧腹侧前运动皮层与额下回后部 (Left Ventral Premotor Cortex / Broca Posterior, BA 6 / 44)',
+          functions: ['口面部与手部动作观察 (Mirror Neuron / Action Observation)', '构音运动规划 (Articulatory Planning)', '精细抓握构型 (Precision Grip)'],
+          summary: '下覆左侧腹侧前运动皮层（PMv），包含经典的“镜像神经元”系统核心区域，在手指抓握构型、动作观察以及言语构音运动想象中显著激活。',
+          erps: [
+            { name: 'Mu 节律去同步 (Mu ERD)', window: '8 – 13 Hz', desc: '不仅在自身执行手部抓握时抑制，在观察他人手部动作时也出现显著 Mu 抑制。' },
+            { name: '构音准备电位 (Articulatory MRCP)', window: '-500 – 0 ms', desc: '在默读或发声想象前出现负向电位漂移。' }
+          ],
+          bci: '抓握类型解码（Precision vs. Power Grasp）、默读言语运动想象 BCI。'
+        },
+        {
+          id: 'FC3', pair: 'FC4', theta: 40, phi: -59, lobeKey: 'motor', networks: ['motor'],
+          cortex: '左侧背侧前运动皮层 (Left Dorsal Premotor Cortex, PMd, BA 6)',
+          functions: ['右手运动规划与准备 (Right-Hand Motor Planning)', '视觉引导手部伸抓 (Visually-Guided Reaching)', '单指动作选择 (Finger Selection)'],
+          summary: '位于左侧背侧前运动皮层（PMd）上方，负责将外部视觉线索转化为右侧上肢与手指的运动计划，在右手手指运动想象中协同 C3 提供关键判别特征。',
+          erps: [
+            { name: '前运动区 Alpha/Beta ERD', window: '8 – 30 Hz', desc: '在运动想象与执行期间持续呈现对侧能量抑制（ERD），提升多指分类鲁棒性。' },
+            { name: '偏侧化准备电位 (LRP) 前部成分', window: '-400 – 0 ms', desc: '反映右手动作选择与运动参数预编程。' }
+          ],
+          bci: '右手单指/多自由度机械手控制、卒中上肢前运动皮层康复训练。'
+        },
+        {
+          id: 'FC1', pair: 'FC2', theta: 24, phi: -45, lobeKey: 'motor', networks: ['motor', 'executive'],
+          cortex: '左侧辅助运动区与背侧前运动内侧部 (Left Supplementary Motor Area, SMA, BA 6)',
+          functions: ['双侧协调与内部动作序列 (Internal Motor Sequencing)', '运动想象启动 (MI Initiation)', '动作时间组织 (Motor Timing)'],
+          summary: '下覆左侧辅助运动区（SMA），主导无需外部提示的内部自发动作序列、双手协调动作以及运动想象的发起。',
+          erps: [
+            { name: '准备电位早期成分 (Bereitschaftspotential, BP1)', window: '-1200 – -500 ms', desc: '自发手指或手腕动作前约1秒在 SMA 区域率先出现的缓慢负向电位。' },
+            { name: 'Beta 同步化反弹 (Post-Movement Beta ERS)', window: '13 – 30 Hz (动作结束后)', desc: '运动想象或执行结束时 SMA/M1 呈现显著 Beta 能量回升。' }
+          ],
+          bci: '自发异步运动想象 BCI（Asynchronous MI-BCI）、序列动作解码。'
+        },
+        {
+          id: 'FCz', pair: null, theta: 18, phi: 0, lobeKey: 'motor', networks: ['executive', 'motor'],
+          cortex: '辅助运动区与背侧前扣带回皮层 (SMA / dACC, BA 6 / 24 / 32)',
+          functions: ['错误监控与行为调整 (Error Monitoring / ERN)', '运动准备与启动 (Motor Readiness)', '冲突解决 (Conflict Resolution)'],
+          summary: '额中央正中线核心导联，直接位于前扣带回（ACC）与辅助运动区（SMA）正上方，是记录**错误相关负波（ERN）**与**准备电位（BP）**的最高幅值标准位点。',
+          erps: [
+            { name: '错误相关负波 (ERN / Ne)', window: '0 – 100 ms (按键错误后)', desc: '受试者意识到操作失误后 50–80 ms 内在 FCz 爆发尖锐负波，是认知神经科学最经典的错误监控指标。' },
+            { name: '反馈相关负波 (FRN / RewP)', window: '200 – 300 ms (反馈后)', desc: '对负性结果或预期违背反馈高度敏感。' },
+            { name: '准备电位峰值 (Bereitschaftspotential)', window: '-1000 – 0 ms', desc: '自发运动前在 FCz/Cz 达到最大负向斜率。' }
+          ],
+          bci: '错误相关电位解码（ErrP-BCI，自动纠正机器人误操作）、自适应闭环脑机接口。'
+        },
+        {
+          id: 'FC2', pair: 'FC1', theta: 24, phi: 45, lobeKey: 'motor', networks: ['motor', 'executive'],
+          cortex: '右侧辅助运动区 (Right Supplementary Motor Area, SMA, BA 6)',
+          functions: ['左手与双侧动作序列规划 (Left/Bilateral Motor Sequencing)', '运动抑制与切换 (Motor Switching)', '节律性运动控制'],
+          summary: '位于右侧辅助运动区上方，协同主导左手动作序列组织、双手协调以及运动任务的快速切换。',
+          erps: [
+            { name: '准备电位 (Bereitschaftspotential)', window: '-1000 – 0 ms', desc: '反映自发运动意向的早期皮层募集。' },
+            { name: '前运动 Beta 调制 (Premotor Beta ERD/ERS)', window: '13 – 30 Hz', desc: '编码动作准备与停止状态。' }
+          ],
+          bci: '左手/双手运动想象解码、下肢步态节律辅助分析。'
+        },
+        {
+          id: 'FC4', pair: 'FC3', theta: 40, phi: 59, lobeKey: 'motor', networks: ['motor'],
+          cortex: '右侧背侧前运动皮层 (Right Dorsal Premotor Cortex, PMd, BA 6)',
+          functions: ['左手运动规划与伸抓 (Left-Hand Motor Planning)', '空间-运动坐标转换 (Visuomotor Transformation)', '双手协调'],
+          summary: '右侧背侧前运动皮层导联，主导左手运动参数规划与空间目标引导，与 C4 共同构成左手运动想象的核心传感器阵列。',
+          erps: [
+            { name: '对侧 Alpha/Beta ERD', window: '8 – 30 Hz', desc: '左手运动想象或执行时呈现显著功率下降。' },
+            { name: '偏侧化准备电位 (LRP)', window: '-400 – 0 ms', desc: '反映左手动作选择的特异性准备。' }
+          ],
+          bci: '左手运动想象 BCI、双侧上肢外骨骼控制。'
+        },
+        {
+          id: 'FC6', pair: 'FC5', theta: 56, phi: 68, lobeKey: 'motor', networks: ['motor', 'executive'],
+          cortex: '右侧腹侧前运动皮层与额下回后部 (Right Ventral Premotor / IFG, BA 6 / 44)',
+          functions: ['运动动作停止抑制 (Action Stopping)', '左手抓握构型 (Left-Hand Grasping)', '社会动作意图理解'],
+          summary: '右侧腹侧前运动皮层与右侧额下回交界区，兼具左手精细抓握规划与快速运动抑制（Braking）双重功能。',
+          erps: [
+            { name: 'Beta 爆发抑制信号 (Beta Burst)', window: '15 – 25 Hz', desc: '在紧急停止手部动作时功率瞬时增强。' },
+            { name: 'Mu 节律去同步', window: '8 – 13 Hz', desc: '左手抓握执行与观察时显著抑制。' }
+          ],
+          bci: '混合型运动-抑制脑机接口、灵巧手抓取解码。'
+        },
+        {
+          id: 'FT8', pair: 'FT7', theta: 72, phi: 72, lobeKey: 'temporal', networks: ['language'],
+          cortex: '右侧前颞叶与额叶岛盖部 (Right Anterior Temporal / Frontal Operculum, BA 38 / 44)',
+          functions: ['音乐与语调韵律加工 (Music & Prosody)', '非言语声音辨别 (Non-Verbal Auditory)', '右颞肌电监测'],
+          summary: '右额颞交界导联，右侧前颞叶与岛盖部对声调起伏、音乐旋律及情感韵律变化尤为敏感。',
+          erps: [
+            { name: '右前颞负波 (Right Anterior Negativity, RAN)', window: '150 – 300 ms', desc: '对音乐和弦违例与语调异常敏感。' },
+            { name: '听觉 N100 / P200', window: '80 – 220 ms', desc: '反映复杂听觉特征的早期皮层编码。' }
+          ],
+          bci: '听觉注意力解码（Auditory Attention Decoding, AAD）、情绪语音识别。'
+        },
+
+        // --- Central / Sensorimotor Line (9) ---
+        {
+          id: 'T7', pair: 'T8', theta: 72, phi: -90, lobeKey: 'temporal', networks: ['language'],
+          cortex: '左侧颞上回与初级/次级听觉皮层 (Left Superior Temporal Gyrus / Auditory Cortex, BA 22 / 41 / 42)',
+          functions: ['语音声学与音素解码 (Phonemic & Speech Processing)', '听觉注意选择 (Auditory Attention)', '语言理解 (Wernicke Anterior)'],
+          summary: '标准 10-20 核心左颞叶导联（旧称 T3），下覆左侧颞上回与听觉皮层，是语音音素辨别、听觉注意力跟踪（鸡尾酒会效应）的关键位点。',
+          erps: [
+            { name: '听觉 N100 – P200 复合波', window: '80 – 200 ms', desc: '对声音刺激物理属性及选择性听觉注意增益高度敏感。' },
+            { name: '失匹配负波 (MMN) 颞叶偶极子', window: '150 – 250 ms', desc: '在乳突参考下呈现与 Fz 极性反转的颞叶听觉记忆痕迹成分。' }
+          ],
+          bci: '听觉注意解码助听器（AAD-BCI）、语音包络神经跟踪。'
+        },
+        {
+          id: 'C5', pair: 'C6', theta: 54, phi: -90, lobeKey: 'motor', networks: ['motor'],
+          cortex: '左侧初级运动/感觉皮层外侧部 (Left Lateral M1/S1 — Face/Thumb Area, BA 4 / 3 / 1 / 2)',
+          functions: ['拇指与面部运动表征 (Thumb & Orofacial Representation)', '体感触觉编码 (Somatosensory Coding)', '外侧感觉运动节律'],
+          summary: '位于中央沟外侧端，覆盖初级感觉运动皮层中靠近拇指与口面部的代表区，在拇指屈伸与面部/舌部运动想象中具有高空间特异性。',
+          erps: [
+            { name: '外侧 Mu / Beta ERD', window: '8 – 30 Hz', desc: '拇指独立运动或口面部运动想象时在 C5 呈现显著能量抑制。' },
+            { name: '体感诱发电位 (SEP N20/P25)', window: '20 – 45 ms', desc: '正中神经电刺激时反映初级体感皮层（S1）的早期传入。' }
+          ],
+          bci: '单指精细解码（区分拇指与小指）、构音运动想象 BCI。'
+        },
+        {
+          id: 'C3', pair: 'C4', theta: 36, phi: -90, lobeKey: 'motor', networks: ['motor'],
+          cortex: '左侧初级运动与体感皮层 · 手结区 (Left Primary Motor & Somatosensory Cortex · Hand Knob, BA 4 / 3 / 1 / 2)',
+          functions: ['右手与单指运动想象/执行 (Right-Hand & Finger MI/ME)', '感觉运动 Mu/Beta 节律调制', '对侧肢体运动控制'],
+          summary: '运动想象脑机接口（MI-BCI）最核心的黄金导联！直接位于左侧中央沟“手结区（Hand Knob）”正上方，主导右手及右手指（拇指、食指、小指）的运动执行与运动想象。',
+          erps: [
+            { name: '对侧 Mu (8–13 Hz) 与 Beta (13–30 Hz) ERD', window: '任务期持续 (500 – 3000 ms)', desc: '右手或单指运动想象/执行期间，C3 处 α/β 节律能量显著去同步下降（ERD），是解码右手意图的最强特征。' },
+            { name: '运动相关皮层电位 (MRCP / 准备电位)', window: '-1000 – +200 ms', desc: '低频（0.3–3 Hz）慢波，反映离散手指动作的规划与启动。' },
+            { name: '运动后 Beta 反弹 (Post-Movement Beta ERS)', window: '动作结束后 300 – 1000 ms', desc: '动作或想象停止后出现显著 Beta 功率超射，反映运动皮层主动重置。' }
+          ],
+          bci: '单指级实时机械手控制、左右手运动想象 BCI、脑卒中偏瘫患者神经康复反馈。'
+        },
+        {
+          id: 'C1', pair: 'C2', theta: 18, phi: -90, lobeKey: 'motor', networks: ['motor'],
+          cortex: '左侧初级运动/感觉皮层内侧部 (Left Medial M1/S1 — Shoulder/Trunk/Proximal Limb, BA 4 / 3)',
+          functions: ['右上肢近端与躯干控制 (Proximal Arm & Trunk)', '辅助运动区协同 (SMA Coupling)', '双侧感觉运动整合'],
+          summary: '位于 C3 与 Cz 之间，覆盖左侧初级运动皮层内侧部（肩肘及近端上肢代表区），与 C3 共同构成立体空间滤波（Laplacian / CSP）的核心邻域。',
+          erps: [
+            { name: '近端上肢 Mu/Beta ERD', window: '8 – 30 Hz', desc: '在伸臂、抬肩及手部运动想象中均呈现稳定的对侧去同步。' },
+            { name: '拉普拉斯空间滤波基准 (Surface Laplacian)', window: '实时空间滤波', desc: '与 Cz、C3、FC1、CP1 组成 C3 的局部拉普拉斯邻域，有效抑制体积传导模糊。' }
+          ],
+          bci: '三维机械臂伸抓控制（Reach-and-Grasp BCI）、高空间分辨率运动解码。'
+        },
+        {
+          id: 'Cz', pair: null, theta: 0, phi: 0, lobeKey: 'motor', networks: ['motor', 'executive'],
+          cortex: '中央旁小叶与双侧初级感觉运动皮层内侧部 (Paracentral Lobule / Medial M1-S1, BA 4 / 3 / 6)',
+          functions: ['双足与下肢运动想象/执行 (Foot & Lower-Limb MI/ME)', 'P300 / N100 听觉与体感中线枢纽', '全脑参考基准 (Vertex)'],
+          summary: '国际 10-20/10-10 系统的几何顶点（Vertex），直接位于纵裂中央旁小叶（双足与下肢运动感觉代表区）上方，同时也是听觉 N1-P2、体感 SEP 及 P300 的核心记录点。',
+          erps: [
+            { name: '双足运动想象 Beta ERS / Mu ERD', window: '8 – 30 Hz', desc: '双脚背屈运动想象时 Cz 呈现特征性 Mu 抑制与显著的中央 Beta 同步化（ERS），与 C3/C4 形成鲜明空间对比。' },
+            { name: '顶点潜能 (Vertex Potential: N100 – P200)', window: '90 – 220 ms', desc: '对突发的听觉、体感或痛觉刺激在 Cz 产生全脑最大振幅的 N1-P2 复合波。' },
+            { name: 'P300 中央成分 (Central P300)', window: '280 – 500 ms', desc: '在靶刺激检测任务中呈现高幅正波。' }
+          ],
+          bci: '三类/四类运动想象 BCI（左手 C4、右手 C3、双脚 Cz）、外骨骼步态控制、P300 拼写器。'
+        },
+        {
+          id: 'C2', pair: 'C1', theta: 18, phi: 90, lobeKey: 'motor', networks: ['motor'],
+          cortex: '右侧初级运动/感觉皮层内侧部 (Right Medial M1/S1 — Proximal Arm/Trunk, BA 4 / 3)',
+          functions: ['左上肢近端与肩肘控制 (Left Proximal Arm)', '双侧运动协调 (Bilateral Coordination)', 'C4 拉普拉斯邻域节点'],
+          summary: '位于 Cz 与 C4 之间，覆盖右侧运动皮层近端上肢与躯干代表区，参与左上肢伸抓规划与局部空间滤波。',
+          erps: [
+            { name: '右侧近端 Mu/Beta ERD', window: '8 – 30 Hz', desc: '左手臂运动或运动想象时功率显著下降。' },
+            { name: '准备电位中央偏侧成分', window: '-800 – 0 ms', desc: '反映双侧及左侧近端肢体动作准备。' }
+          ],
+          bci: '上肢康复机器人控制、CSP 共空间模式滤波器核心特征通道。'
+        },
+        {
+          id: 'C4', pair: 'C3', theta: 36, phi: 90, lobeKey: 'motor', networks: ['motor'],
+          cortex: '右侧初级运动与体感皮层 · 手结区 (Right Primary Motor & Somatosensory Cortex · Hand Knob, BA 4 / 3 / 1 / 2)',
+          functions: ['左手与单指运动想象/执行 (Left-Hand & Finger MI/ME)', '对侧 Mu/Beta 节律去同步', '双手运动偏侧化对照'],
+          summary: '与 C3 对称的右侧感觉运动区核心导联，覆盖右侧中央沟“手结区”，主导左手及左手指的运动执行与运动想象；在右手任务中亦表现出同侧抑制/激活调制。',
+          erps: [
+            { name: '左手对侧 Mu (8–13 Hz) 与 Beta (13–30 Hz) ERD', window: '任务期持续 (500 – 3000 ms)', desc: '左手运动想象时 C4 出现强烈能量抑制，与 C3 构成左右手二分类 BCI 的黄金特征对。' },
+            { name: '运动相关皮层电位 (MRCP)', window: '-1000 – +200 ms', desc: '左手精细动作发起前的低频负向准备电位。' }
+          ],
+          bci: '左右手运动想象 BCI、左侧偏瘫脑卒中康复评估、假肢手控制。'
+        },
+        {
+          id: 'C6', pair: 'C5', theta: 54, phi: 90, lobeKey: 'motor', networks: ['motor'],
+          cortex: '右侧初级运动/感觉皮层外侧部 (Right Lateral M1/S1 — Thumb/Face Area, BA 4 / 3 / 1 / 2)',
+          functions: ['左手拇指与口面部表征 (Left Thumb & Face)', '体感触觉处理 (Somatosensory Processing)', '外侧感觉运动节律'],
+          summary: '位于右侧中央沟外侧端，覆盖左手拇指及左侧面部感觉运动皮层，提升单指级别分类与外侧感觉运动映射精度。',
+          erps: [
+            { name: '外侧 Mu / Beta ERD', window: '8 – 30 Hz', desc: '左手拇指屈伸与面部动作时呈现显著功率变化。' },
+            { name: '体感诱发电位 (Right S1 SEP)', window: '20 – 45 ms', desc: '反映左侧正中神经传入的早期皮层响应。' }
+          ],
+          bci: '高密度单指解码、体感神经反馈接口。'
+        },
+        {
+          id: 'T8', pair: 'T7', theta: 72, phi: 90, lobeKey: 'temporal', networks: ['language'],
+          cortex: '右侧颞上回与次级听觉皮层 (Right Superior Temporal Gyrus / Auditory Cortex, BA 22 / 41 / 42)',
+          functions: ['音高、旋律与声音空间定位 (Pitch, Melody & Sound Localization)', '情感语调识别 (Affective Prosody)', '选择性听觉注意'],
+          summary: '标准 10-20 核心右颞叶导联（旧称 T4），相比左侧 T7 更擅长处理音高轮廓、音乐和声、声音空间方位以及说话人的情感语气。',
+          erps: [
+            { name: '听觉 N100 – P200', window: '80 – 200 ms', desc: '对声音强度、音高变化及空间方位线索高度敏感。' },
+            { name: '右颞 MMN (Pitch/Duration MMN)', window: '150 – 250 ms', desc: '对声音频率或时长偏差产生自动化失匹配响应。' }
+          ],
+          bci: '听觉空间定向 BCI、音乐神经解码、听觉稳态响应（ASSR）监测。'
+        },
+
+        // --- Centroparietal Line (9) ---
+        {
+          id: 'TP7', pair: 'TP8', theta: 72, phi: -108, lobeKey: 'temporal', networks: ['language'],
+          cortex: '左侧颞上回后部 / 韦尼克区 (Left Posterior Superior Temporal Gyrus / Wernicke’s Area, BA 22 / 40)',
+          functions: ['口语与书面语理解 (Language Comprehension)', '语音-语义映射 (Phonological-Semantic Mapping)', '听觉工作记忆'],
+          summary: '左颞顶交界导联，直接覆盖经典的韦尼克区（Wernicke’s Area），是语言理解、词汇语义激活及听觉语音解码的核心枢纽。',
+          erps: [
+            { name: 'N400 语义整合负波', window: '300 – 500 ms', desc: '当句子或语境中出现语义违背词汇时呈现显著负波。' },
+            { name: 'N170 视觉词形特征 (Visual Word Form)', window: '150 – 200 ms', desc: '左后颞枕区对母语文字/字符呈现左侧偏侧化早期负波。' }
+          ],
+          bci: '语义解码 BCI、失语症语言理解功能评估。'
+        },
+        {
+          id: 'CP5', pair: 'CP6', theta: 56, phi: -112, lobeKey: 'parietal', networks: ['motor', 'language'],
+          cortex: '左侧缘上回与次级体感皮层 (Left Supramarginal Gyrus / S2, BA 40 / 43)',
+          functions: ['触觉本体感觉整合 (Proprioceptive Integration)', '工具使用与动作表征 (Praxis & Tool Use)', '语音短期记忆'],
+          summary: '位于左侧缘上回（BA 40）与次级体感皮层（S2），负责整合手部触觉-本体感觉反馈与复杂工具操作动作表征。',
+          erps: [
+            { name: '体感 P100 / N140 (S2 成分)', window: '90 – 160 ms', desc: '反映双侧次级体感皮层对触觉刺激的注意调制。' },
+            { name: 'Alpha/Beta 体感调制', window: '8 – 30 Hz', desc: '在想象抓握或感受物体纹理时呈现显著去同步。' }
+          ],
+          bci: '双向闭环假肢（感觉反馈+运动解码）、触觉脑机接口。'
+        },
+        {
+          id: 'CP3', pair: 'CP4', theta: 40, phi: -121, lobeKey: 'parietal', networks: ['motor', 'spatial'],
+          cortex: '左侧中央后回与顶前小叶 (Left Postcentral Gyrus / Anterior Parietal Cortex, BA 1 / 2 / 5 / 40)',
+          functions: ['本体感觉反馈与手部构型 (Proprioception & Hand Shaping)', '运动想象体感表象 (Kinesthetic MI)', '感觉运动整合'],
+          summary: '紧邻 C3 后方的体感-顶叶过渡导联，在“动觉型运动想象（Kinesthetic Motor Imagery）”和手部真实屈伸的本体感觉反馈中发挥关键作用。',
+          erps: [
+            { name: '动觉型运动想象 Mu/Beta ERD', window: '8 – 30 Hz', desc: '当受试者想象“肌肉用力与关节弯曲感”而非纯视觉画面时，CP3 激活尤为强烈。' },
+            { name: '运动后体感诱发波 (Reafferent Potential)', window: '运动启动后 50 – 150 ms', desc: '反映真实手指运动产生的肌肉与皮肤本体感觉传入。' }
+          ],
+          bci: '高准确率动觉运动想象 BCI、区分真实运动执行（ME）与纯运动想象（MI）。'
+        },
+        {
+          id: 'CP1', pair: 'CP2', theta: 24, phi: -135, lobeKey: 'parietal', networks: ['motor', 'spatial'],
+          cortex: '左侧顶上小叶前部 (Left Anterior Superior Parietal Lobule, BA 5 / 7)',
+          functions: ['肢体空间位置追踪 (Limb State Estimation)', '伸抓运动轨迹修正 (Online Reach Correction)', 'P300 中央顶叶过渡'],
+          summary: '位于左侧顶上小叶前部（BA 5），负责实时计算手部与目标物体之间的空间相对位置，实现动作过程中的在线微调。',
+          erps: [
+            { name: '中央顶叶正波 (CPP / P3b 前部)', window: '300 – 550 ms', desc: '反映知觉证据累积（Evidence Accumulation）与决策达成。' },
+            { name: 'Alpha/Beta 顶叶抑制', window: '8 – 30 Hz', desc: '在目标导向伸抓与空间定位任务中持续活跃。' }
+          ],
+          bci: '连续二维/三维光标与机械臂轨迹跟踪（Continuous Tracking BCI）。'
+        },
+        {
+          id: 'CPz', pair: null, theta: 18, phi: 180, lobeKey: 'parietal', networks: ['executive', 'spatial'],
+          cortex: '内侧顶上小叶与楔前叶前部 (Medial Superior Parietal / Precuneus, BA 5 / 7)',
+          functions: ['知觉决策证据累积 (Decision Evidence Accumulation)', 'P3b 经典记录枢纽', '身体中线空间参照 (Egocentric Midline)'],
+          summary: '中央顶叶正中线导联，下覆内侧顶叶与楔前叶（Precuneus），是记录**中央顶叶正波（CPP）**和 **P300（P3b）**的核心枢纽。',
+          erps: [
+            { name: '中央顶叶正波 (Centro-Parietal Positivity, CPP)', window: '250 – 600 ms', desc: '无论刺激模态（视觉/听觉/触觉），CPP 爬升斜率均精确编码知觉决策证据的累积速率。' },
+            { name: 'P3b 经典成分', window: '300 – 500 ms', desc: '靶刺激出现后呈现高信噪比正波，广泛用于 P300 BCI。' }
+          ],
+          bci: 'P300 拼写器与目标检测 BCI、知觉决策信心与反应时预测。'
+        },
+        {
+          id: 'CP2', pair: 'CP1', theta: 24, phi: 135, lobeKey: 'parietal', networks: ['motor', 'spatial'],
+          cortex: '右侧顶上小叶前部 (Right Anterior Superior Parietal Lobule, BA 5 / 7)',
+          functions: ['空间坐标整合 (Spatial Coordinate Integration)', '左手空间伸抓引导 (Left-Hand Spatial Reaching)', '知觉决策累积'],
+          summary: '右侧顶上小叶前部导联，主导以自我为中心（Egocentric）的空间位置更新与左手空间定位。',
+          erps: [
+            { name: 'CPP / P3b 正波', window: '300 – 550 ms', desc: '编码目标检测与空间注意力聚焦。' },
+            { name: '右顶叶 Alpha/Beta 调制', window: '8 – 30 Hz', desc: '参与空间任务中的感觉运动整合。' }
+          ],
+          bci: '空间导航与连续轨迹解码 BCI。'
+        },
+        {
+          id: 'CP4', pair: 'CP3', theta: 40, phi: 121, lobeKey: 'parietal', networks: ['motor', 'spatial'],
+          cortex: '右侧中央后回与顶前小叶 (Right Postcentral Gyrus / Anterior Parietal Cortex, BA 1 / 2 / 5 / 40)',
+          functions: ['左手本体感觉表征 (Left-Hand Proprioception)', '空间触觉定位 (Spatial Tactile Localization)', '动觉运动想象'],
+          summary: '紧邻 C4 后方，负责左手触觉与本体感觉信息加工，在左手运动想象与空间触觉注意中扮演重要角色。',
+          erps: [
+            { name: '左侧肢体动觉 Mu/Beta ERD', window: '8 – 30 Hz', desc: '左手屈伸想象期间能量显著降低。' },
+            { name: '体感 P100 / P300', window: '100 – 400 ms', desc: '对左手触觉 Oddball 靶刺激产生明显正波。' }
+          ],
+          bci: '触觉 P300 脑机接口（Tactile P300 BCI，适用于视力受损患者）、左手 MI 解码。'
+        },
+        {
+          id: 'CP6', pair: 'CP5', theta: 56, phi: 112, lobeKey: 'parietal', networks: ['spatial'],
+          cortex: '右侧缘上回与颞顶联合区前部 (Right Supramarginal Gyrus / Anterior TPJ, BA 40)',
+          functions: ['空间注意重定向 (Spatial Attention Reorienting)', '心理意象与自我位置感 (Embodiment)', '社会视角采择 (Theory of Mind)'],
+          summary: '位于右侧缘上回与颞顶联合区（rTPJ），是腹侧注意网络（VAN）的核心节点，负责在视野意外位置出现重要事件时打断当前注意并迅速重定向。',
+          erps: [
+            { name: '右顶叶 P3a / 重定向正波', window: '280 – 420 ms', desc: '当目标出现在非预期空间位置（Invalid Cue）时波幅显著增大。' },
+            { name: 'Alpha 偏侧化调控', window: '8 – 13 Hz', desc: '协调双侧视野的注意资源分配。' }
+          ],
+          bci: '突发事件警觉 BCI、虚拟现实具身感（Embodiment）神经评估。'
+        },
+        {
+          id: 'TP8', pair: 'TP7', theta: 72, phi: 108, lobeKey: 'temporal', networks: ['spatial', 'language'],
+          cortex: '右侧颞顶联合区与颞上回后部 (Right Temporoparietal Junction / Posterior STG, BA 22 / 39 / 40)',
+          functions: ['空间定向与显著性检测 (Spatial Orientation & Salience)', '生物运动与面孔表情感知', '跨模态空间整合'],
+          summary: '右侧颞顶联合区（rTPJ）核心导联，主导全局空间定向、跨模态（视-听）空间定位，该区域损伤常导致典型的左侧空间忽视（Hemispatial Neglect）。',
+          erps: [
+            { name: '听觉/视听空间定向 P3', window: '300 – 450 ms', desc: '对空间方位变化的声源或视觉靶标产生显著响应。' },
+            { name: '颞顶 N200', window: '180 – 280 ms', desc: '反映新异空间特征的自动检测。' }
+          ],
+          bci: '空间听觉导航 BCI、空间忽视临床康复评估。'
+        },
+
+        // --- Parietal Line (9) ---
+        {
+          id: 'P7', pair: 'P8', theta: 72, phi: -126, lobeKey: 'parietal', networks: ['spatial', 'visual', 'language'],
+          cortex: '左侧后颞下回与外侧枕顶皮层 (Left Posterior Inferior Temporal / Lateral Occipitoparietal, BA 37 / 19)',
+          functions: ['视觉词形与物体识别 (Visual Word Form & Object Recognition)', '右侧视野空间注意 (Right-Field Attention)', '视觉工作记忆'],
+          summary: '标准 10-20 经典导联（旧称 T5），位于左后颞与顶枕交界区，对文字符号、熟悉物体构型及右侧视野空间注意加工尤为敏感。',
+          erps: [
+            { name: 'N170 视觉专业化负波 (Visual Expertise N170)', window: '150 – 190 ms', desc: '看到文字、符号或熟悉物体时在 P7 诱发尖锐早期负波（文字呈左偏侧化）。' },
+            { name: 'N2pc 注意选择波 (N2-posterior-contralateral)', window: '200 – 280 ms', desc: '当注意力转向右侧视野目标时，P7 相比 P8 出现显著负向偏转。' }
+          ],
+          bci: '快速序列视觉呈现（RSVP）目标检索 BCI、阅读与视觉搜索解码。'
+        },
+        {
+          id: 'P5', pair: 'P6', theta: 58, phi: -132, lobeKey: 'parietal', networks: ['spatial', 'visual'],
+          cortex: '左侧顶下小叶外侧部与枕外侧皮层 (Left Lateral Inferior Parietal / Lateral Occipital, BA 39 / 19)',
+          functions: ['视觉空间注意转移 (Visuospatial Attention Shift)', '物体三维结构知觉 (3D Object Structure)', '工作记忆容量维持'],
+          summary: '连接顶下小叶与外侧视觉皮层的过渡导联，参与视野注意焦点的缩放、目标追踪以及视觉工作记忆项目维持。',
+          erps: [
+            { name: '对侧延迟活动 (Contralateral Delay Activity, CDA)', window: '300 – 900 ms', desc: '维持右侧视野视觉工作记忆项目期间，P5 呈现持续负波，波幅随记忆项目数（1~4个）线性增加直至达到个体容量上限。' },
+            { name: 'N2pc 空间选择成分', window: '200 – 280 ms', desc: '标记空间注意力在复杂干扰项中锁定目标的瞬间。' }
+          ],
+          bci: '视觉工作记忆容量评估、多目标视觉追踪 BCI。'
+        },
+        {
+          id: 'P3', pair: 'P4', theta: 44, phi: -141, lobeKey: 'parietal', networks: ['spatial', 'executive'],
+          cortex: '左侧顶上/顶下小叶、角回与缘上回 (Left Superior/Inferior Parietal Lobule & Angular Gyrus, BA 7 / 39 / 40)',
+          functions: ['空间定向与视觉空间注意 (Spatial Orientation & Attention)', 'P300 情境更新 (Context Updating)', '心算与符号操作 (Mental Arithmetic & Praxis)'],
+          summary: '国际 10-20 系统最经典的顶叶核心导联！下覆左侧顶上/顶下小叶与顶内沟（IPS），主导**空间定向**、右侧视野视觉空间注意分配、情景记忆提取以及心算符号加工；在运动想象任务中也反映自上而下的视觉空间注意调制。',
+          erps: [
+            { name: 'P300 / P3b 经典顶叶正波', window: '300 – 600 ms', desc: '在 Oddball 靶刺激检测、决策确认与工作记忆情境更新时产生高幅正波，是 P300 脑机接口的核心位点。' },
+            { name: '顶叶 Alpha 偏侧化 (Parietal Alpha Lateralization)', window: '8 – 13 Hz', desc: '当注意力定向至左侧空间时，左顶叶 P3 的 Alpha 功率升高（主动抑制无关右侧视野干扰）；定向至右侧空间时 P3 Alpha 显著下降。' },
+            { name: 'N2pc 空间注意选择波', window: '200 – 280 ms', desc: '捕捉空间注意力瞬间锁定目标的神经印记。' }
+          ],
+          bci: '隐蔽空间注意脑机接口（Covert Visuospatial Attention BCI）、P300 拼写器、认知负荷与空间定向评估。'
+        },
+        {
+          id: 'P1', pair: 'P2', theta: 37, phi: -160, lobeKey: 'parietal', networks: ['spatial', 'executive'],
+          cortex: '左侧顶上小叶内侧部 (Left Medial Superior Parietal Lobule, BA 7)',
+          functions: ['背侧注意网络调控 (Dorsal Attention Network)', '空间坐标系转换 (Spatial Transformation)', '情景记忆检索 (Episodic Retrieval)'],
+          summary: '位于左侧顶上小叶内侧（BA 7），属于背侧注意网络（DAN）的核心节点，主导主动、自上而下的空间注意定向与心理意象空间排布。',
+          erps: [
+            { name: 'P3b 顶叶内侧正波', window: '300 – 550 ms', desc: '在靶刺激识别与工作记忆更新时呈现高幅正波。' },
+            { name: '顶叶记忆效应 (Left Parietal Old/New Effect)', window: '500 – 800 ms', desc: '成功回忆起既往经历细节时，左顶叶（P1/P3）呈现显著正向晚期正成分（LPC）。' }
+          ],
+          bci: 'P300 拼写器、空间定向与心理意象解码。'
+        },
+        {
+          id: 'Pz', pair: null, theta: 36, phi: 180, lobeKey: 'parietal', networks: ['executive', 'spatial'],
+          cortex: '双侧内侧顶上小叶与楔前叶 (Medial Superior Parietal Lobule / Precuneus, BA 7)',
+          functions: ['P300 (P3b) 全脑最大峰值位点', '工作记忆与情境更新 (Context Updating)', '空间心理意象与自我意识 (Precuneus)'],
+          summary: '国际 10-20 顶中线黄金导联！下覆内侧顶上小叶与楔前叶（Precuneus），是经典认知成分 **P300（P3b）** 在全头皮记录到**最大波幅**的标准位点，同时在视觉心理意象（Mental Imagery）与空间导航中起核心作用。',
+          erps: [
+            { name: 'P300 / P3b 峰值成分', window: '300 – 600 ms', desc: '所有 P300 范式（视觉/听觉 Oddball、RSVP、P300 拼写器）中波幅最高、信噪比最好的核心导联。' },
+            { name: '晚期正成分 (Late Positive Potential, LPP)', window: '400 – 1000 ms', desc: '反映情感唤醒度与持续注意资源投入。' },
+            { name: '顶枕 Alpha 节律 (Parietal Alpha)', window: '8 – 13 Hz', desc: '闭眼放松或内部心理意象（Mental Imagery）时呈现强节律调制。' }
+          ],
+          bci: 'P300 脑机接口打字机（P300 Speller）第一首选导联、意识与认知障碍临床诱发电位检测。'
+        },
+        {
+          id: 'P2', pair: 'P1', theta: 37, phi: 160, lobeKey: 'parietal', networks: ['spatial', 'executive'],
+          cortex: '右侧顶上小叶内侧部 (Right Medial Superior Parietal Lobule, BA 7)',
+          functions: ['全局空间定向 (Global Spatial Orientation)', '心理旋转与三维表象 (Mental Rotation)', '视觉空间注意力分配'],
+          summary: '位于右侧顶上小叶内侧（BA 7），右半球顶叶在三维空间心理旋转、全局空间地图构建及双侧视野注意监控中具有显著功能优势。',
+          erps: [
+            { name: '心理旋转相关负波 (Rotation-Related Negativity, RRN)', window: '400 – 800 ms', desc: '在三维物体心理旋转任务中，右顶叶负向慢波随旋转角度增大而增强。' },
+            { name: 'P3b 顶叶正波', window: '300 – 550 ms', desc: '编码空间靶刺激的检测与注意确认。' }
+          ],
+          bci: '空间导航 BCI、三维空间心理意象解码。'
+        },
+        {
+          id: 'P4', pair: 'P3', theta: 44, phi: 141, lobeKey: 'parietal', networks: ['spatial', 'executive'],
+          cortex: '右侧顶上/顶下小叶与角回 (Right Superior/Inferior Parietal Lobule & Angular Gyrus, BA 7 / 39 / 40)',
+          functions: ['空间定向与双侧视野注意主导 (Dominant Spatial Orientation)', '三维心理旋转与空间定位', 'P300 情境更新'],
+          summary: '与 P3 对称的右侧顶叶核心导联！右半球顶叶是人类大脑**空间定向（Spatial Orientation）**与视觉空间注意的优势中枢（同时监控左、右两侧视野），在空间注意 BCI 与心理旋转中表现突出。',
+          erps: [
+            { name: '顶叶 Alpha 偏侧化 (Parietal Alpha Modulation)', window: '8 – 13 Hz', desc: '注意力转向左侧视野时 P4 Alpha 显著去同步下降（开放感知通道）；转向右侧视野时 P4 Alpha 升高（抑制干扰），与 P3 形成镜像推拉（Push-Pull）机制。' },
+            { name: 'P300 / P3b 顶叶正波', window: '300 – 600 ms', desc: '在空间靶刺激检测与工作记忆更新中产生高幅正波。' },
+            { name: '心理旋转慢负波 (RRN)', window: '400 – 800 ms', desc: '反映空间表象变换的认知计算负荷。' }
+          ],
+          bci: '隐蔽视觉空间注意 BCI（左/右空间定向二分类）、P300 拼写器、空间认知训练。'
+        },
+        {
+          id: 'P6', pair: 'P5', theta: 58, phi: 132, lobeKey: 'parietal', networks: ['spatial', 'visual'],
+          cortex: '右侧顶下小叶外侧部与枕外侧皮层 (Right Lateral Inferior Parietal / Lateral Occipital, BA 39 / 19)',
+          functions: ['左侧视野空间注意选择 (Left-Field Attention)', '视觉工作记忆维持 (Visual WM)', '整体格式塔知觉 (Global Gestalt)'],
+          summary: '位于右侧顶下小叶与枕外侧交界，负责左侧视野空间目标的注意捕获与视觉工作记忆表征维持。',
+          erps: [
+            { name: '对侧延迟活动 (CDA)', window: '300 – 900 ms', desc: '记忆左侧视野视觉对象时呈现持续负波，精确反映视觉工作记忆负载。' },
+            { name: 'N2pc 空间选择成分', window: '200 – 280 ms', desc: '注意力聚焦于左侧视野靶标时相比 P5 显著负偏。' }
+          ],
+          bci: '视觉空间工作记忆解码、多目标快速检索 BCI。'
+        },
+        {
+          id: 'P8', pair: 'P7', theta: 72, phi: 126, lobeKey: 'parietal', networks: ['spatial', 'visual'],
+          cortex: '右侧后颞下回与梭状回投射区 (Right Posterior Inferior Temporal / Fusiform Area, BA 37 / 19)',
+          functions: ['面孔识别与表情加工 (Face Processing / FFA)', '左侧视野空间注意 (N2pc)', '高级视觉物体分类'],
+          summary: '标准 10-20 经典导联（旧称 T6），下覆右侧枕颞腹侧通路（紧邻梭状回面孔区 FFA），是记录**面孔特异性 N170** 与左侧视野 **N2pc** 的最经典位点。',
+          erps: [
+            { name: '面孔特异性 N170 (Face-Sensitive N170)', window: '150 – 180 ms', desc: '看到人类面孔时在 P8 诱发全头皮最尖锐的右偏侧化负波（显著强于物体）。' },
+            { name: 'N2pc 空间注意选择波', window: '200 – 280 ms', desc: '当注意力转向左侧视野目标时，P8 呈现标志性负向波幅增强。' }
+          ],
+          bci: '面孔诱发 P300/N170 脑机接口（Face-Speller，显著提升拼写速度）、RSVP 图像检索。'
+        },
+
+        // --- Parieto-Occipital Line (5) ---
+        {
+          id: 'PO7', pair: 'PO8', theta: 72, phi: -144, lobeKey: 'occipital', networks: ['visual', 'spatial'],
+          cortex: '左侧顶枕外侧皮层与背侧/腹侧视觉通路 (Left Lateral Parieto-Occipital Cortex, BA 18 / 19)',
+          functions: ['右侧视野早期空间注意 (N2pc / P1)', '视觉运动与轮廓加工 (Visual Motion & Contour)', 'SSVEP 外侧视觉响应'],
+          summary: '位于左顶枕交界外侧，兼顾背侧“空间位置通路（Where）”与腹侧“物体识别通路（What）”，是 N2pc、CDA 与 SSVEP 的重要记录通道。',
+          erps: [
+            { name: 'N2pc 与 Pd 干扰抑制波', window: '200 – 300 ms', desc: 'N2pc 标记对右侧靶标的注意捕获，Pd（Distractor Positivity）标记对右侧强干扰物的主动抑制。' },
+            { name: '稳态视觉诱发电位 (SSVEP)', window: '刺激闪烁频率及其谐波', desc: '对视野外周高频闪烁刺激产生高信噪比锁频响应。' }
+          ],
+          bci: '高频 SSVEP 脑机接口、视觉搜索干扰抑制解码。'
+        },
+        {
+          id: 'PO3', pair: 'PO4', theta: 56, phi: -156, lobeKey: 'occipital', networks: ['visual', 'spatial'],
+          cortex: '左侧顶枕沟与楔叶上外侧部 (Left Parieto-Occipital Sulcus / Cuneus, BA 18 / 19 / 7)',
+          functions: ['顶枕 Alpha 节律生成器 (Parieto-Occipital Alpha)', '视觉空间注意门控 (Visual Attention Gating)', 'SSVEP 视觉解码'],
+          summary: '位于顶枕沟（Parieto-Occipital Sulcus）上方，这里是人脑**视觉 Alpha 节律（8–13 Hz）**的主要皮层起源区之一，调控视觉信息的注意力门控与心理意象。',
+          erps: [
+            { name: '顶枕 Alpha 节律调制 (PO Alpha ERD/ERS)', window: '8 – 13 Hz', desc: '视觉注意聚焦或视觉意象时功率抑制；抑制无关视野时功率升高。' },
+            { name: 'SSVEP 稳态响应', window: '基频 f 与 2f 谐波', desc: '与 Oz、POz 共同构成 SSVEP 典型相关分析（CCA / TRCA）的核心阵列。' }
+          ],
+          bci: '高速 SSVEP 拼写器、视觉空间注意脑机接口。'
+        },
+        {
+          id: 'POz', pair: null, theta: 54, phi: 180, lobeKey: 'occipital', networks: ['visual', 'spatial', 'executive'],
+          cortex: '双侧顶枕沟与楔叶 (Bilateral Parieto-Occipital Sulcus / Cuneus, BA 18 / 19 / 7)',
+          functions: ['SSVEP 核心中线导联', '顶枕 Alpha 振荡中枢', '视觉 P300 / N200 过渡'],
+          summary: '顶枕正中线导联，连接顶叶 Pz 与枕叶 Oz，兼具极强的 SSVEP 稳态视觉信号与视觉 P300 响应，是混合型视觉脑机接口的必选通道。',
+          erps: [
+            { name: 'SSVEP 稳态视觉诱发电位', window: '5 – 40 Hz 刺激频率', desc: '与 Oz 协同提供全头皮最强的 SSVEP 信噪比。' },
+            { name: '视觉 P300 与 N200', window: '200 – 500 ms', desc: '对视觉靶标刺激产生稳定响应，支持 SSVEP + P300 混合范式。' }
+          ],
+          bci: '高速 SSVEP 脑机接口（信息传输率 ITR > 300 bits/min）、混合视觉 BCI。'
+        },
+        {
+          id: 'PO4', pair: 'PO3', theta: 56, phi: 156, lobeKey: 'occipital', networks: ['visual', 'spatial'],
+          cortex: '右侧顶枕沟与楔叶上外侧部 (Right Parieto-Occipital Sulcus / Cuneus, BA 18 / 19 / 7)',
+          functions: ['视觉空间注意门控 (Visual Attention Gating)', '右侧顶枕 Alpha 振荡', 'SSVEP 视觉解码'],
+          summary: '右侧顶枕沟导联，与 PO3 对称，参与左侧视野视觉注意门控、视觉心理意象的顶-枕信息自上而下回传（Top-Down Feedback）以及 SSVEP 响应。',
+          erps: [
+            { name: '右侧顶枕 Alpha 偏侧化', window: '8 – 13 Hz', desc: '调控左/右半视野视觉皮层的兴奋性门控。' },
+            { name: 'SSVEP 稳态响应', window: '基频 f 与 2f 谐波', desc: '为空间滤波器（TRCA）提供关键的右侧顶枕空间相位信息。' }
+          ],
+          bci: 'SSVEP 脑机接口、视觉空间注意力方向解码。'
+        },
+        {
+          id: 'PO8', pair: 'PO7', theta: 72, phi: 144, lobeKey: 'occipital', networks: ['visual', 'spatial'],
+          cortex: '右侧顶枕外侧皮层与背侧/腹侧视觉通路 (Right Lateral Parieto-Occipital Cortex, BA 18 / 19)',
+          functions: ['左侧视野空间注意 (N2pc / Pd)', '视觉运动 V5/MT+ 邻近投射', 'SSVEP 外侧视觉响应'],
+          summary: '右顶枕外侧导联，邻近视觉运动区（V5/MT+）与外侧枕叶皮层，在左侧视野目标选择（N2pc）、视觉运动方向感知及 SSVEP 中表现优异。',
+          erps: [
+            { name: 'N2pc 注意捕获波', window: '200 – 280 ms', desc: '左侧视野出现目标刺激时呈现显著负波。' },
+            { name: '运动起始诱发电位 (Motion-Onset N200)', window: '160 – 220 ms', desc: '由视觉运动刺激（如移动光栅）诱发，常用于低疲劳度运动视觉 BCI。' }
+          ],
+          bci: '视觉运动诱发电位 BCI（mVEP-BCI）、SSVEP 与空间注意解码。'
+        },
+
+        // --- Occipital Line (3) ---
+        {
+          id: 'O1', pair: 'O2', theta: 72, phi: -162, lobeKey: 'occipital', networks: ['visual'],
+          cortex: '左侧初级与次级视觉皮层 (Left Primary & Secondary Visual Cortex, V1 / V2 / V3, BA 17 / 18)',
+          functions: ['右侧视野早期视觉编码 (Right-Hemifield Early Vision)', '视觉诱发电位 (VEP P100)', 'SSVEP 枕叶左通道'],
+          summary: '标准 10-20 核心左枕叶导联，直接覆盖左侧初级视觉皮层（V1）与纹外皮层（V2/V3），主要接收来自**右侧视野**的视网膜视觉输入。',
+          erps: [
+            { name: '模式翻转视觉诱发电位 (Pattern-Reversal VEP P100)', window: '95 – 115 ms', desc: '棋盘格翻转刺激在 100 ms 左右诱发尖锐正波，是临床评估视神经与视觉通路完整性的金标准。' },
+            { name: 'C1 早期视皮层成分', window: '60 – 90 ms', desc: '起源于距状裂（V1），对上/下视野刺激呈现特征性极性反转。' },
+            { name: 'SSVEP 稳态视觉诱发电位', window: '刺激频率 f 及其谐波', desc: '在频率域呈现极窄带宽的能量尖峰。' }
+          ],
+          bci: 'SSVEP 脑机接口核心导联、临床视神经通路功能诊断（VEP）。'
+        },
+        {
+          id: 'Oz', pair: null, theta: 72, phi: 180, lobeKey: 'occipital', networks: ['visual'],
+          cortex: '双侧初级视觉皮层 · 距状裂极 (Bilateral Primary Visual Cortex / Calcarine Pole, V1, BA 17)',
+          functions: ['中央凹视觉信息处理 (Foveal Vision)', 'SSVEP 全脑最强信噪比导联', '视觉诱发电位 (VEP) 核心'],
+          summary: '枕叶正中线黄金导联，直接位于双侧初级视觉皮层（V1）中央凹代表区正上方！是 **SSVEP（稳态视觉诱发电位）** 和 **c-VEP（编码调制视觉诱发电位）** 全头皮信噪比最高的单导联。',
+          erps: [
+            { name: 'SSVEP / c-VEP 稳态视觉响应', window: '5 – 60 Hz 频率锁定', desc: '当注视特定频率闪烁的视觉目标时，Oz 呈现高度锁频锁相的振荡尖峰，支持数十至上百个指令的高速解码。' },
+            { name: 'VEP P100 峰值成分', window: '95 – 115 ms', desc: '中央视野视觉刺激诱发的最大正波。' },
+            { name: '枕叶闭眼 Alpha 节律 (Berger Effect)', window: '8 – 13 Hz', desc: '闭眼安静时出现全脑最显著的 10 Hz 正弦样 Alpha 波，睁眼瞬间立即阻断（Alpha Blocking）。' }
+          ],
+          bci: '高速 SSVEP/c-VEP 脑机接口打字机与机械臂控制第一首选导联、闭眼状态开关检测。'
+        },
+        {
+          id: 'O2', pair: 'O1', theta: 72, phi: 162, lobeKey: 'occipital', networks: ['visual'],
+          cortex: '右侧初级与次级视觉皮层 (Right Primary & Secondary Visual Cortex, V1 / V2 / V3, BA 17 / 18)',
+          functions: ['左侧视野早期视觉编码 (Left-Hemifield Early Vision)', '视觉诱发电位 (VEP P100)', 'SSVEP 枕叶右通道'],
+          summary: '标准 10-20 核心右枕叶导联，下覆右侧 V1/V2/V3 视觉皮层，主要接收来自**左侧视野**的视觉信号，与 O1、Oz 共同构成经典的枕叶视觉三角阵列。',
+          erps: [
+            { name: 'VEP P100 与 N75-P100-N145 复合波', window: '75 – 145 ms', desc: '反映左侧视野视觉对比度、空间频率与边缘轮廓的早期加工。' },
+            { name: 'SSVEP 稳态视觉诱发电位', window: '基频 f 与多阶谐波', desc: '与 O1、Oz 组合进行多通道空域滤波，大幅提升 SSVEP 抗噪声能力。' }
+          ],
+          bci: 'SSVEP 脑机接口、半视野视觉空间注意解码、临床视觉诱发电位检测。'
+        },
+
+        // --- Mastoids & Inion Reference / Posterior Base (3) ---
+        {
+          id: 'M1', pair: 'M2', theta: 92, phi: -102, lobeKey: 'temporal', networks: ['language'],
+          cortex: '左侧乳突骨突 / 下颞枕基准 (Left Mastoid Process — Anatomical Reference)',
+          functions: ['标准离线重参考基准 (Linked Mastoids Reference)', '听觉诱发极性反转对照', '低脑电活动骨性参考'],
+          summary: '位于左耳后乳突骨突（旧称 A1/TP9 邻近），下覆无皮层神经元的颞骨乳突，因远离头顶皮层电活动而广泛用作 ERP 研究的**双侧乳突平均重参考（M1+M2）/2**。',
+          erps: [
+            { name: '听觉 MMN / N100 极性反转参考', window: '80 – 250 ms', desc: '以鼻尖为参考时，颞上回听觉偶极子在 M1/M2 处呈现与 Fz 相反的正向偏转，是验证真实听觉皮层起源的经典判据。' }
+          ],
+          bci: 'ERP 离线分析标准重参考基准（确保 P300、N400、ERN 波形与国际文献可比）。'
+        },
+        {
+          id: 'M2', pair: 'M1', theta: 92, phi: 102, lobeKey: 'temporal', networks: ['language'],
+          cortex: '右侧乳突骨突 / 下颞枕基准 (Right Mastoid Process — Anatomical Reference)',
+          functions: ['标准离线重参考基准 (Linked Mastoids Reference)', '心电/颈部肌电伪迹监测', '双侧对称参考配对'],
+          summary: '位于右耳后乳突骨突（旧称 A2/TP10 邻近），通常与 M1 数学平均（Algebraically Linked Mastoids）作为 ERP 波形重参考，避免单侧参考引入半球偏侧化偏差。',
+          erps: [
+            { name: '双侧乳突参考基准 (Average Mastoids)', window: '全时程重参考', desc: '消除单侧乳突阻抗差异造成的左右半球电位偏移。' }
+          ],
+          bci: '经典认知 ERP 范式（P300、N400、LRP）离线重参考标准通道。'
+        },
+        {
+          id: 'Iz', pair: null, theta: 90, phi: 180, lobeKey: 'occipital', networks: ['visual'],
+          cortex: '枕外隆凸 / 枕极最下缘 (Inion — Lower Calcarine & Cerebellar Tentorium Border)',
+          functions: ['枕外隆凸解剖定位标志 (Inion Landmark)', '高频 SSVEP 与下视野 VEP', '颈肌电/视觉皮层边界'],
+          summary: '位于后脑勺正中骨性突起——**枕外隆凸（Inion）**处，是国际 10-20/10-10 系统测量前后径（Nasion–Inion）的后端解剖零点，对高频 SSVEP 与上视野 V1 投射敏感。',
+          erps: [
+            { name: '高频 SSVEP 谐波响应', window: '20 – 60 Hz', desc: '在高频无闪烁感 SSVEP 范式中常捕获到清晰的谐波成分。' },
+            { name: '早期 C1 / VEP 边界响应', window: '65 – 110 ms', desc: '反映距状裂下缘视觉皮层的早期电位变化。' }
+          ],
+          bci: '脑电帽佩戴前后径（Nasion–Inion）精确校准基准点、高频 SSVEP 辅助通道。'
+        }
+      ];
+
+      // Map lookup dictionary, Working Memory network tagging & precomputed search corpus
+      const WM_CORE_SET = new Set([
+        'AF7', 'AF3', 'AFz', 'AF4',
+        'F7', 'F5', 'F3', 'F1', 'Fz', 'F2', 'F4', 'F6',
+        'FCz', 'CPz',
+        'P7', 'P5', 'P3', 'P1', 'Pz', 'P2', 'P4', 'P6', 'P8',
+        'PO3', 'PO4', 'PO7', 'PO8'
+      ]);
+      const ELECTRODE_MAP = {};
+      ELECTRODES_DATA.forEach(e => {
+        if (WM_CORE_SET.has(e.id) && !e.networks.includes('wm')) {
+          e.networks.push('wm');
+        }
+        e._searchText = [
+          e.id,
+          e.cortex,
+          e.functions.join(' '),
+          e.summary,
+          e.bci,
+          e.erps.map(x => `${x.name} ${x.desc}`).join(' ')
+        ].join(' ').toLowerCase();
+        ELECTRODE_MAP[e.id] = e;
+      });
+
+      // Safe HTML escaping + inline **bold** markdown formatter
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+      function formatRichText(str) {
+        return escapeHtml(str).replace(/\*\*(.+?)\*\*/g, '<strong class="text-slate-100 font-semibold">$1</strong>');
+      }
+
+      // =========================================================================
+      // 2. THREE.JS SCENE, LIGHTING & PROCEDURAL 3D ANATOMICAL BRAIN BUILDER
+      // =========================================================================
+      const container = document.getElementById('canvas-container');
+      const scene = new THREE.Scene();
+
+      const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 100);
+      // Start with a flattering 3/4 superior-left-posterior angle (anatomical Left is +X when Nose is +Z and Vertex is +Y)
+      camera.position.set(2.35, 2.25, -2.55);
+
+      let renderer;
+      try {
+        renderer = new THREE.WebGLRenderer({
+          antialias: true,
+          alpha: true,
+          preserveDrawingBuffer: true // Essential for high-DPI PNG screenshot export
+        });
+      } catch (err) {
+        document.getElementById('webgl-fallback').classList.remove('hidden');
+        return;
+      }
+
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.12;
+      container.appendChild(renderer.domElement);
+
+      // Center 3D brain in the open area left of the 400px inspector panel on desktop (>= 1024px)
+      function updateCameraViewport() {
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        camera.aspect = w / h;
+        if (w >= 1024) {
+          camera.setViewOffset(w, h, 200, 0, w, h);
+        } else {
+          camera.clearViewOffset();
+        }
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      }
+      updateCameraViewport();
+
+      const controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.065;
+      controls.minDistance = 2.1;
+      controls.maxDistance = 7.5;
+      controls.target.set(0, 0.08, 0);
+      controls.autoRotate = false;
+      controls.autoRotateSpeed = 0.9;
+
+      // Cancel preset camera animation immediately if user interacts
+      let camTransition = null;
+      controls.addEventListener('start', () => {
+        camTransition = null;
+      });
+
+      // Studio Three-Point Scientific Lighting
+      scene.add(new THREE.AmbientLight(0xdbeafe, 0.58));
+
+      const keyLight = new THREE.DirectionalLight(0xffffff, 0.92);
+      keyLight.position.set(3.5, 5.2, 4.0);
+      scene.add(keyLight);
+
+      const fillLight = new THREE.DirectionalLight(0x93c5fd, 0.48);
+      fillLight.position.set(-4.2, 2.0, -3.5);
+      scene.add(fillLight);
+
+      const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.42);
+      rimLight.position.set(0, -3.5, -4.0);
+      scene.add(rimLight);
+
+      // Master Anatomical Group
+      const brainRoot = new THREE.Group();
+      scene.add(brainRoot);
+
+      // Scalp Ellipsoid Radii (Anterior +Z, Superior +Y, Left +X / Right -X)
+      const SCALP_RX = 1.14;
+      const SCALP_RY = 1.18;
+      const SCALP_RZ = 1.35;
+
+      // -------------------------------------------------------------------------
+      // Procedural Cortical Hemisphere Generator with Gyri/Sulci & Lobe Colors
+      // -------------------------------------------------------------------------
+      let isLobeColorEnabled = true;
+      const hemisphereGeometries = [];
+
+      function smoothstep(edge0, edge1, x) {
+        const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+        return t * t * (3 - 2 * t);
+      }
+
+      function createCerebralHemisphere(sideSign) {
+        // sideSign: +1 for Anatomical Left Hemisphere (+X), -1 for Anatomical Right Hemisphere (-X)
+        const geo = new THREE.SphereGeometry(1, 108, 84);
+        const posAttr = geo.attributes.position;
+        const count = posAttr.count;
+
+        const tissueColors = new Float32Array(count * 3);
+        const lobeColors = new Float32Array(count * 3);
+
+        const cGyrus = new THREE.Color(0xe6c3c6);
+        const cSulcus = new THREE.Color(0x7c4a54);
+
+        const cFrontal   = new THREE.Color(0x38bdf8);
+        const cMotor     = new THREE.Color(0xf59e0b);
+        const cParietal  = new THREE.Color(0xa855f7);
+        const cTemporal  = new THREE.Color(0x10b981);
+        const cOccipital = new THREE.Color(0xf43f5e);
+
+        const v = new THREE.Vector3();
+        const tempColor = new THREE.Color();
+
+        for (let i = 0; i < count; i++) {
+          v.fromBufferAttribute(posAttr, i);
+          const ux = v.x;
+          const uy = v.y;
+          const uz = v.z;
+
+          const halfT = (ux + 1) * 0.5;
+          // Fill ~89% of the cranial vault cleanly so there is no hollow gap under the scalp
+          const medialCurve = 0.015 + 0.018 * Math.pow(uy, 2) + 0.012 * Math.pow(uz, 2);
+          let x = sideSign * (medialCurve + Math.pow(halfT, 0.80) * 1.035);
+          let y = uy * 1.045 + 0.035;
+          let z = uz * 1.245;
+
+          if (uz > 0) {
+            x *= (1.0 - 0.14 * Math.pow(uz, 2.2));
+            if (uy < 0.05) {
+              const orbitalLift = smoothstep(0.18, 0.95, uz) * smoothstep(0.05, -0.85, uy);
+              y += orbitalLift * 0.28;
+            }
+          }
+
+          if (uz < 0) {
+            x *= (1.0 - 0.13 * Math.pow(-uz, 2.3));
+            if (uy < 0.0) {
+              const tentoriumLift = smoothstep(-0.22, -0.95, uz) * smoothstep(0.0, -0.85, uy);
+              y += tentoriumLift * 0.28;
+            }
+          }
+
+          const tempMaskZ = smoothstep(-0.56, -0.22, uz) * (1 - smoothstep(0.28, 0.52, uz));
+          const tempMaskY = smoothstep(0.36, 0.04, uy) * smoothstep(-0.92, -0.52, uy);
+          const tempMaskLat = smoothstep(0.20, 0.70, halfT);
+          const tempBulge = tempMaskZ * tempMaskY * tempMaskLat;
+          x += sideSign * tempBulge * 0.14;
+          y -= tempBulge * 0.10;
+          z += tempBulge * 0.06;
+
+          const sylvianLineY = 0.36 - 0.24 * uz;
+          const sylvianDist = Math.abs(uy - sylvianLineY);
+          const sylvianZMask = smoothstep(-0.44, -0.26, uz) * (1 - smoothstep(0.26, 0.44, uz));
+          const sylvianGroove = Math.exp(-Math.pow(sylvianDist / 0.052, 2)) * sylvianZMask * tempMaskLat;
+
+          const centralZTarget = 0.10 - 0.18 * uy;
+          const centralDist = Math.abs(uz - centralZTarget);
+          const centralYMask = smoothstep(sylvianLineY - 0.02, sylvianLineY + 0.14, uy);
+          const centralGroove = Math.exp(-Math.pow(centralDist / 0.045, 2)) * centralYMask;
+
+          const precentralRidge = Math.exp(-Math.pow((uz - (centralZTarget + 0.085)) / 0.055, 2)) * centralYMask;
+          const postcentralRidge = Math.exp(-Math.pow((uz - (centralZTarget - 0.085)) / 0.055, 2)) * centralYMask;
+
+          const poLineZ = -0.56 - 0.13 * uy;
+          const poGroove = Math.exp(-Math.pow((uz - poLineZ) / 0.046, 2)) * smoothstep(0.06, 0.36, halfT);
+
+          const freq = 10.5;
+          const warp1 = Math.sin(uy * 7.2 + uz * 6.4 + sideSign * 1.1) * 0.42;
+          const warp2 = Math.cos(uz * 8.1 - halfT * 7.5) * 0.38;
+          const g1 = Math.abs(Math.sin(uz * freq + warp1 * 3.2 + halfT * 4.5));
+          const g2 = Math.abs(Math.cos(uy * (freq * 1.08) + warp2 * 3.0 - uz * 3.8));
+          const g3 = Math.abs(Math.sin(halfT * 9.5 + uy * 6.0 - uz * 5.2));
+
+          const rawFold = Math.pow(g1 * 0.48 + g2 * 0.34 + g3 * 0.18, 0.72);
+          const foldMask = smoothstep(0.03, 0.25, halfT);
+          const foldDisplacement = (rawFold - 0.45) * 0.044 * foldMask;
+
+          const totalDisp =
+            foldDisplacement
+            - sylvianGroove * 0.062
+            - centralGroove * 0.048
+            - poGroove * 0.032
+            + (precentralRidge + postcentralRidge) * 0.016;
+
+          const radialLen = Math.sqrt(x * x + y * y + z * z) || 1;
+          x += (x / radialLen) * totalDisp;
+          y += (y / radialLen) * totalDisp;
+          z += (z / radialLen) * totalDisp;
+
+          posAttr.setXYZ(i, x, y, z);
+
+          const sulcusDepth = Math.max(
+            0,
+            Math.min(1, rawFold * 1.15 - sylvianGroove * 0.85 - centralGroove * 0.75 - poGroove * 0.55)
+          );
+          const aoFactor = 0.42 + 0.58 * sulcusDepth;
+
+          tempColor.copy(cSulcus).lerp(cGyrus, sulcusDepth);
+          tissueColors[i * 3]     = tempColor.r;
+          tissueColors[i * 3 + 1] = tempColor.g;
+          tissueColors[i * 3 + 2] = tempColor.b;
+
+          const aboveSylvian = smoothstep(sylvianLineY - 0.04, sylvianLineY + 0.05, uy);
+          const wMotor = smoothstep(0.17, 0.06, Math.abs(uz - centralZTarget)) * aboveSylvian;
+          const wTemporal = (1 - aboveSylvian)
+            * smoothstep(poLineZ - 0.04, poLineZ + 0.08, uz)
+            * (1 - smoothstep(0.36, 0.49, uz))
+            * smoothstep(0.14, 0.36, halfT);
+          const wOccipital = smoothstep(poLineZ + 0.06, poLineZ - 0.08, uz) * (1 - wTemporal * 0.8);
+          const wParietal = smoothstep(0.05, -0.07, uz - centralZTarget)
+            * aboveSylvian
+            * (1 - wOccipital)
+            * (1 - wMotor * 0.78);
+          const wFrontal = Math.max(0.01, 1.0 - (wMotor + wTemporal + wOccipital + wParietal));
+
+          const wSum = wMotor + wTemporal + wOccipital + wParietal + wFrontal;
+          tempColor.setRGB(
+            (cFrontal.r * wFrontal + cMotor.r * wMotor + cParietal.r * wParietal + cTemporal.r * wTemporal + cOccipital.r * wOccipital) / wSum,
+            (cFrontal.g * wFrontal + cMotor.g * wMotor + cParietal.g * wParietal + cTemporal.g * wTemporal + cOccipital.g * wOccipital) / wSum,
+            (cFrontal.b * wFrontal + cMotor.b * wMotor + cParietal.b * wParietal + cTemporal.b * wTemporal + cOccipital.b * wOccipital) / wSum
+          );
+          tempColor.lerp(cGyrus, 0.22).multiplyScalar(aoFactor);
+
+          lobeColors[i * 3]     = tempColor.r;
+          lobeColors[i * 3 + 1] = tempColor.g;
+          lobeColors[i * 3 + 2] = tempColor.b;
+        }
+
+        geo.computeVertexNormals();
+        geo.userData.tissueColors = tissueColors;
+        geo.userData.lobeColors = lobeColors;
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(lobeColors), 3));
+
+        const mat = new THREE.MeshStandardMaterial({
+          vertexColors: true,
+          roughness: 0.54,
+          metalness: 0.06,
+        });
+
+        hemisphereGeometries.push(geo);
+        return new THREE.Mesh(geo, mat);
+      }
+
+      brainRoot.add(createCerebralHemisphere(1), createCerebralHemisphere(-1));
+
+      // Deep Subcortical Core: Corpus Callosum, Thalamus, Basal Ganglia & Midbrain
+      // Fills the interior core seamlessly between the two hemispheres and brainstem
+      function createDeepBrainStructures() {
+        const group = new THREE.Group();
+
+        // 1. Corpus Callosum (White-matter arch bridging left & right hemispheres)
+        const ccCurve = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(0, 0.10, 0.56),   // Genu (anterior)
+          new THREE.Vector3(0, 0.34, 0.34),
+          new THREE.Vector3(0, 0.40, 0.02),   // Body
+          new THREE.Vector3(0, 0.32, -0.34),
+          new THREE.Vector3(0, 0.16, -0.52)   // Splenium (posterior)
+        ]);
+        const ccGeo = new THREE.TubeGeometry(ccCurve, 36, 0.12, 16, false);
+        ccGeo.scale(2.2, 0.78, 1.0);
+        const ccMat = new THREE.MeshStandardMaterial({ color: 0xe2d5d8, roughness: 0.52, metalness: 0.04 });
+        group.add(new THREE.Mesh(ccGeo, ccMat));
+
+        // 2. Bilateral Thalamus & Basal Ganglia / Limbic Core
+        const subMat = new THREE.MeshStandardMaterial({ color: 0xc49ba6, roughness: 0.56, metalness: 0.05 });
+        const thalGeo = new THREE.SphereGeometry(0.24, 28, 22);
+        thalGeo.scale(0.88, 0.85, 1.38);
+        const bgGeo = new THREE.SphereGeometry(0.22, 24, 18);
+        bgGeo.scale(0.95, 0.90, 1.45);
+        [-1, 1].forEach(side => {
+          const thal = new THREE.Mesh(thalGeo, subMat);
+          thal.position.set(side * 0.19, 0.03, -0.04);
+          group.add(thal);
+
+          const bg = new THREE.Mesh(bgGeo, subMat);
+          bg.position.set(side * 0.36, 0.06, 0.12);
+          group.add(bg);
+        });
+
+        // 3. Midbrain / Cerebral Peduncles connecting Thalamus to Pons
+        const midGeo = new THREE.CylinderGeometry(0.26, 0.22, 0.38, 24, 8);
+        const midMesh = new THREE.Mesh(midGeo, new THREE.MeshStandardMaterial({ color: 0xc9a3aa, roughness: 0.56 }));
+        midMesh.position.set(0, -0.24, -0.10);
+        midMesh.rotation.x = -0.22;
+        group.add(midMesh);
+
+        return group;
+      }
+      brainRoot.add(createDeepBrainStructures());
+
+      // Striated Cerebellum (Fuller bilateral hemispheres + central vermis nestled under tentorium)
+      function createCerebellum() {
+        const group = new THREE.Group();
+        const cBase = new THREE.Color(0xbf8b97);
+        const cFolia = new THREE.Color(0x69414b);
+        [-1, 1].forEach(side => {
+          const geo = new THREE.SphereGeometry(0.45, 56, 42);
+          const pos = geo.attributes.position;
+          const colors = new Float32Array(pos.count * 3);
+          const v = new THREE.Vector3();
+          const col = new THREE.Color();
+
+          for (let i = 0; i < pos.count; i++) {
+            v.fromBufferAttribute(pos, i);
+            const folia = Math.abs(Math.sin(v.y * 40.0 + v.z * 6.0));
+            const disp = (folia - 0.5) * 0.016;
+            v.x = v.x * 1.08 + disp * v.x;
+            v.y = v.y * 0.72 + disp * v.y;
+            v.z = v.z * 0.90 + disp * v.z;
+            pos.setXYZ(i, v.x, v.y, v.z);
+
+            col.copy(cFolia).lerp(cBase, 0.35 + 0.65 * folia);
+            colors[i * 3] = col.r;
+            colors[i * 3 + 1] = col.g;
+            colors[i * 3 + 2] = col.b;
+          }
+          geo.computeVertexNormals();
+          geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+          const mesh = new THREE.Mesh(
+            geo,
+            new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.58, metalness: 0.05 })
+          );
+          mesh.position.set(side * 0.35, -0.46, -0.60);
+          mesh.rotation.x = 0.20;
+          group.add(mesh);
+        });
+
+        // Central Cerebellar Vermis bridging the two cerebellar lobes
+        const vermisGeo = new THREE.SphereGeometry(0.24, 24, 20);
+        vermisGeo.scale(0.68, 1.05, 1.25);
+        const vermis = new THREE.Mesh(
+          vermisGeo,
+          new THREE.MeshStandardMaterial({ color: 0xa6737f, roughness: 0.62, metalness: 0.05 })
+        );
+        vermis.position.set(0, -0.46, -0.58);
+        group.add(vermis);
+
+        return group;
+      }
+      brainRoot.add(createCerebellum());
+
+      // Brainstem (Pons & Medulla Oblongata extending smoothly into upper neck)
+      function createBrainstem() {
+        const geo = new THREE.CylinderGeometry(0.23, 0.14, 0.98, 32, 24);
+        const pos = geo.attributes.position;
+        const v = new THREE.Vector3();
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i);
+          const ponsMask = Math.exp(-Math.pow((v.y - 0.18) / 0.16, 2));
+          if (v.z > 0) v.z += ponsMask * 0.095;
+          v.x += ponsMask * Math.sign(v.x) * 0.045;
+          pos.setXYZ(i, v.x, v.y, v.z);
+        }
+        geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(
+          geo,
+          new THREE.MeshStandardMaterial({ color: 0xcfaab1, roughness: 0.56, metalness: 0.05 })
+        );
+        mesh.position.set(0, -0.76, -0.22);
+        mesh.rotation.x = -0.22;
+        return mesh;
+      }
+      brainRoot.add(createBrainstem());
+
+      // -------------------------------------------------------------------------
+      // Sculpted Realistic Translucent Human Head, Face, Ears & Neck Shell
+      // Upper cranium (uy >= 0.02) stays strictly faithful to SCALP_RX/RY/RZ so
+      // all 64 International 10-10 electrodes remain flush on the scalp surface.
+      // -------------------------------------------------------------------------
+      const scalpMat = new THREE.MeshPhysicalMaterial({
+        color: 0xa5b4fc,
+        emissive: 0x0f172a,
+        emissiveIntensity: 0.15,
+        transparent: true,
+        opacity: 0.22,
+        roughness: 0.24,
+        metalness: 0.08,
+        clearcoat: 0.45,
+        clearcoatRoughness: 0.28,
+        depthWrite: false,
+        side: THREE.FrontSide
+      });
+
+      const landmarkMat = new THREE.MeshPhysicalMaterial({
+        color: 0x94a3b8,
+        transparent: true,
+        opacity: 0.28,
+        roughness: 0.30,
+        metalness: 0.08,
+        depthWrite: false
+      });
+
+      function createHumanHeadShell() {
+        const geo = new THREE.SphereGeometry(1, 104, 88);
+        const pos = geo.attributes.position;
+        const v = new THREE.Vector3();
+
+        for (let i = 0; i < pos.count; i++) {
+          v.fromBufferAttribute(pos, i);
+          const ux = v.x;
+          const uy = v.y;
+          const uz = v.z;
+
+          let x = ux * SCALP_RX;
+          let y = uy * SCALP_RY;
+          let z = uz * SCALP_RZ;
+
+          // Blend weight for facial & jaw sculpting below the supraorbital hairline
+          // Keeps upper cranium (uy > 0.08) untouched for exact 10-10 electrode seating
+          const faceBlend = smoothstep(0.08, -0.14, uy);
+          const frontMask = smoothstep(-0.08, 0.38, uz);
+          const absX = Math.abs(ux);
+
+          if (faceBlend > 0) {
+            // 1. Elongate lower face downward to form realistic jaw & chin
+            const lowerFaceDrop = smoothstep(-0.15, -0.95, uy) * (0.28 * frontMask + 0.10 * (1 - frontMask));
+            y -= lowerFaceDrop;
+
+            // 2. Taper lower cheeks & jawline toward chin (oval human face contour)
+            const jawTaper = smoothstep(-0.20, -0.92, uy);
+            x *= 1.0 - jawTaper * (0.34 * frontMask + 0.28 * (1 - frontMask));
+
+            // Flatten lower facial profile slightly anteriorly while preserving chin projection
+            const lowerZPull = smoothstep(-0.32, -0.88, uy) * frontMask;
+            z -= lowerZPull * 0.16;
+
+            // 3. Supraorbital Brow Ridge (眉弓)
+            const browY = Math.exp(-Math.pow((uy - 0.00) / 0.065, 2));
+            const browX = smoothstep(0.62, 0.20, absX);
+            const browZ = smoothstep(0.55, 0.88, uz);
+            z += browY * browX * browZ * 0.055;
+
+            // 4. Bilateral Eye Sockets / Orbits (眼眶凹陷)
+            const eyeY = Math.exp(-Math.pow((uy + 0.13) / 0.085, 2));
+            const eyeX = Math.exp(-Math.pow((absX - 0.34) / 0.14, 2));
+            const eyeZ = smoothstep(0.55, 0.85, uz);
+            z -= eyeY * eyeX * eyeZ * 0.13;
+
+            // 5. Sculpted Nose Bridge, Tip & Nasal Wings (立体鼻梁与鼻尖)
+            const noseZMask = smoothstep(0.62, 0.90, uz);
+            const noseBridgeY = smoothstep(-0.02, -0.14, uy) * (1 - smoothstep(-0.34, -0.44, uy));
+            const noseBridgeX = Math.exp(-Math.pow(absX / 0.105, 2));
+            const noseTipY = Math.exp(-Math.pow((uy + 0.31) / 0.075, 2));
+            const noseTipX = Math.exp(-Math.pow(absX / 0.13, 2));
+            const nostrilWing = Math.exp(-Math.pow((uy + 0.35) / 0.045, 2)) * Math.exp(-Math.pow((absX - 0.13) / 0.065, 2));
+            z += (noseBridgeY * noseBridgeX * 0.14 + noseTipY * noseTipX * 0.19 + nostrilWing * 0.055) * noseZMask;
+            y -= noseTipY * noseTipX * noseZMask * 0.03;
+
+            // 6. Cheekbones / Zygomatic Arch (颧骨轮廓)
+            const cheekY = Math.exp(-Math.pow((uy + 0.26) / 0.11, 2));
+            const cheekX = Math.exp(-Math.pow((absX - 0.56) / 0.18, 2));
+            const cheekZ = smoothstep(0.20, 0.72, uz);
+            x += Math.sign(ux) * cheekY * cheekX * cheekZ * 0.05;
+            z += cheekY * cheekX * cheekZ * 0.045;
+
+            // 7. Upper & Lower Lips + Philtrum / Mouth Indentation (嘴唇与人中)
+            const mouthZMask = smoothstep(0.45, 0.80, uz);
+            const upperLip = Math.exp(-Math.pow((uy + 0.51) / 0.038, 2)) * Math.exp(-Math.pow(absX / 0.22, 2));
+            const mouthCleft = Math.exp(-Math.pow((uy + 0.555) / 0.022, 2)) * Math.exp(-Math.pow(absX / 0.23, 2));
+            const lowerLip = Math.exp(-Math.pow((uy + 0.60) / 0.042, 2)) * Math.exp(-Math.pow(absX / 0.20, 2));
+            z += (upperLip * 0.085 - mouthCleft * 0.06 + lowerLip * 0.08) * mouthZMask;
+
+            // 8. Mentolabial Fold & Chin Prominence (颏唇沟与下巴)
+            const chinFold = Math.exp(-Math.pow((uy + 0.67) / 0.04, 2)) * Math.exp(-Math.pow(absX / 0.22, 2)) * mouthZMask;
+            const chinTip = Math.exp(-Math.pow((uy + 0.78) / 0.09, 2)) * Math.exp(-Math.pow(absX / 0.24, 2)) * smoothstep(0.25, 0.72, uz);
+            z += (-chinFold * 0.055 + chinTip * 0.11);
+
+            // 9. Posterior Occipital Nape Tuck (后脑勺向后颈收束)
+            const napeMask = smoothstep(-0.38, -0.88, uy) * smoothstep(0.05, -0.55, uz);
+            z += napeMask * 0.34;
+          }
+
+          pos.setXYZ(i, x, y, z);
+        }
+
+        geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, scalpMat);
+        mesh.renderOrder = 2;
+        return mesh;
+      }
+
+      const scalpMesh = createHumanHeadShell();
+      brainRoot.add(scalpMesh);
+
+      // Sleek Translucent Neck Silhouette below the Cranial Base
+      const neckGeo = new THREE.CylinderGeometry(0.48, 0.64, 0.72, 40, 12, true);
+      const neckMesh = new THREE.Mesh(neckGeo, landmarkMat);
+      neckMesh.position.set(0, -1.42, -0.16);
+      neckMesh.renderOrder = 1;
+      brainRoot.add(neckMesh);
+
+      // Subtle Facial Feature Contour Lines (Brows, Nose Bridge, Jawline) for Instant Face Readability
+      function createFacialContours() {
+        const group = new THREE.Group();
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.26 });
+
+        // Midline facial profile curve (Forehead -> Nose -> Lips -> Chin)
+        const profilePts = [
+          new THREE.Vector3(0, 0.28, 1.32),
+          new THREE.Vector3(0, 0.02, 1.38),
+          new THREE.Vector3(0, -0.14, 1.44),
+          new THREE.Vector3(0, -0.38, 1.50),
+          new THREE.Vector3(0, -0.45, 1.30),
+          new THREE.Vector3(0, -0.60, 1.24),
+          new THREE.Vector3(0, -0.74, 1.18),
+          new THREE.Vector3(0, -0.96, 1.06),
+          new THREE.Vector3(0, -1.24, 0.80)
+        ];
+        group.add(new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(new THREE.CatmullRomCurve3(profilePts).getPoints(48)),
+          lineMat
+        ));
+
+        // Bilateral subtle brow arches
+        [-1, 1].forEach(side => {
+          const browPts = [
+            new THREE.Vector3(side * 0.14, -0.02, 1.36),
+            new THREE.Vector3(side * 0.34, 0.03, 1.30),
+            new THREE.Vector3(side * 0.56, -0.02, 1.16)
+          ];
+          group.add(new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(new THREE.CatmullRomCurve3(browPts).getPoints(24)),
+            lineMat
+          ));
+        });
+
+        return group;
+      }
+      brainRoot.add(createFacialContours());
+
+      function createMeridianArc(isSagittal) {
+        const pts = [];
+        for (let deg = -90; deg <= 90; deg += 3) {
+          const rad = THREE.MathUtils.degToRad(deg);
+          if (isSagittal) {
+            pts.push(new THREE.Vector3(0, Math.cos(rad) * (SCALP_RY + 0.004), Math.sin(rad) * (SCALP_RZ + 0.004)));
+          } else {
+            pts.push(new THREE.Vector3(Math.sin(rad) * (SCALP_RX + 0.004), Math.cos(rad) * (SCALP_RY + 0.004), 0));
+          }
+        }
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(80));
+        return new THREE.Line(
+          geo,
+          new THREE.LineBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.20 })
+        );
+      }
+      brainRoot.add(createMeridianArc(true), createMeridianArc(false));
+
+      // Sculpted Translucent Auricles (Outer + Inner Helix Ears)
+      const outerEarGeo = new THREE.TorusGeometry(0.15, 0.028, 12, 32, Math.PI * 1.45);
+      outerEarGeo.rotateY(Math.PI / 2);
+      outerEarGeo.rotateX(-0.28);
+      const innerEarGeo = new THREE.TorusGeometry(0.085, 0.018, 10, 24, Math.PI * 1.2);
+      innerEarGeo.rotateY(Math.PI / 2);
+      innerEarGeo.rotateX(-0.20);
+      [-1, 1].forEach(side => {
+        const earGroup = new THREE.Group();
+        const outer = new THREE.Mesh(outerEarGeo, landmarkMat);
+        const inner = new THREE.Mesh(innerEarGeo, landmarkMat);
+        inner.position.set(side * 0.01, -0.02, 0.02);
+        earGroup.add(outer, inner);
+        earGroup.scale.set(1, 1.42, 0.88);
+        earGroup.position.set(side * (SCALP_RX + 0.015), -0.25, -0.06);
+        brainRoot.add(earGroup);
+      });
+
+      const labelsLayer = document.getElementById('labels-layer');
+
+      // Anatomical Left (+X) & Right (-X) Orientation Reference Badges
+      const sideMarkers = [
+        { text: 'L (左)', pos: new THREE.Vector3(SCALP_RX + 0.22, -0.18, 0), el: document.createElement('div'), screenX: 0, screenY: 0, visible: false },
+        { text: 'R (右)', pos: new THREE.Vector3(-(SCALP_RX + 0.22), -0.18, 0), el: document.createElement('div'), screenX: 0, screenY: 0, visible: false }
+      ];
+      sideMarkers.forEach(m => {
+        m.el.className = 'side-badge text-[11px] font-bold tracking-wider px-2 py-0.5 rounded-md bg-slate-900/75 text-cyan-300/90 border border-cyan-400/30 backdrop-blur-sm';
+        m.el.textContent = m.text;
+        labelsLayer.appendChild(m.el);
+      });
+
+      // =========================================================================
+      // 3. BUILD 64-CHANNEL 3D ELECTRODE SENSORS (SHARED GEOMETRIES) & LABELS
+      // =========================================================================
+      const electrodeMeshes = [];
+      const electrodeRegistry = {};
+
+      // Shared geometries & static materials across all 64 sensors
+      const sharedCollarGeo = new THREE.CylinderGeometry(0.032, 0.036, 0.016, 20);
+      const sharedCollarMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.75, roughness: 0.25 });
+      const sharedCapGeo    = new THREE.SphereGeometry(0.025, 20, 16, 0, Math.PI * 2, 0, Math.PI * 0.6);
+      const sharedHaloGeo   = new THREE.RingGeometry(0.042, 0.056, 32);
+      sharedHaloGeo.rotateX(-Math.PI / 2);
+      const sharedHitGeo    = new THREE.SphereGeometry(0.068, 12, 12);
+      const sharedHitMat    = new THREE.MeshBasicMaterial({ visible: false });
+
+      function sphericalToScalp(thetaDeg, phiDeg) {
+        const theta = THREE.MathUtils.degToRad(thetaDeg);
+        const phi = THREE.MathUtils.degToRad(phiDeg);
+        const nx = -Math.sin(theta) * Math.sin(phi);
+        const ny = Math.cos(theta);
+        const nz = Math.sin(theta) * Math.cos(phi);
+
+        const pos = new THREE.Vector3(nx * SCALP_RX, ny * SCALP_RY, nz * SCALP_RZ);
+        const normal = new THREE.Vector3(
+          pos.x / (SCALP_RX * SCALP_RX),
+          pos.y / (SCALP_RY * SCALP_RY),
+          pos.z / (SCALP_RZ * SCALP_RZ)
+        ).normalize();
+        const cortexPos = new THREE.Vector3(nx * 1.01, ny * 1.03 + 0.03, nz * 1.19);
+        return { pos, normal, cortexPos };
+      }
+
+      const upVec = new THREE.Vector3(0, 1, 0);
+
+      ELECTRODES_DATA.forEach(item => {
+        const { pos, normal, cortexPos } = sphericalToScalp(item.theta, item.phi);
+
+        const group = new THREE.Group();
+        group.position.copy(pos);
+        group.quaternion.setFromUnitVectors(upVec, normal);
+
+        const collarMesh = new THREE.Mesh(sharedCollarGeo, sharedCollarMat);
+        group.add(collarMesh);
+
+        const capMat = new THREE.MeshStandardMaterial({
+          color: 0x94a3b8,
+          emissive: 0x0f172a,
+          emissiveIntensity: 0.4,
+          roughness: 0.25,
+          metalness: 0.2
+        });
+        const capMesh = new THREE.Mesh(sharedCapGeo, capMat);
+        capMesh.position.y = 0.006;
+        group.add(capMesh);
+
+        const haloMat = new THREE.MeshBasicMaterial({
+          color: 0x22d3ee,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.0
+        });
+        const haloMesh = new THREE.Mesh(sharedHaloGeo, haloMat);
+        haloMesh.position.y = 0.012;
+        group.add(haloMesh);
+
+        const hitMesh = new THREE.Mesh(sharedHitGeo, sharedHitMat);
+        hitMesh.userData.electrodeId = item.id;
+        group.add(hitMesh);
+        electrodeMeshes.push(hitMesh);
+
+        brainRoot.add(group);
+
+        const labelEl = document.createElement('button');
+        labelEl.className = 'eeg-label';
+        labelEl.textContent = item.id;
+        labelEl.title = `${item.id} · ${item.cortex}`;
+        labelEl.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectElectrode(item.id, true, false);
+        });
+        labelsLayer.appendChild(labelEl);
+
+        electrodeRegistry[item.id] = {
+          data: item,
+          group,
+          capMesh,
+          haloMesh,
+          pos,
+          normal,
+          cortexPos,
+          labelEl,
+          screenX: 0,
+          screenY: 0,
+          labelOpacity: 1,
+          isVisible: false
+        };
+      });
+
+      // Dynamic Visual Links: Bilateral Cortical Projection Beams + Contralateral Symmetry Arc
+      const dynamicVisualsGroup = new THREE.Group();
+      brainRoot.add(dynamicVisualsGroup);
+      let activeSpotMesh = null;
+
+      // -------------------------------------------------------------------------
+      // Cognitive & Working Memory (认知与工作记忆) 3D Network Arcs & Callouts
+      // -------------------------------------------------------------------------
+      let showCognitiveCallouts = true;
+
+      const COGNITIVE_CALLOUTS = [
+        {
+          id: 'wm-dlpfc-l',
+          hub: 'F3',
+          title: 'DLPFC · 工作记忆维持与刷新',
+          sub: 'F3 / AF3 · 言语工作记忆与执行操作',
+          offset: new THREE.Vector3(0.18, 0.14, 0.20)
+        },
+        {
+          id: 'wm-acc',
+          hub: 'Fz',
+          title: 'mPFC / ACC · Fmθ 认知控制',
+          sub: 'Fz / FCz · 4–7 Hz 前额中线 Theta 与冲突监控',
+          offset: new THREE.Vector3(0.0, 0.22, 0.18)
+        },
+        {
+          id: 'wm-dlpfc-r',
+          hub: 'F4',
+          title: '右前额 · 空间工作记忆与抑制',
+          sub: 'F4 / AF4 · 空间保持与反应制动',
+          offset: new THREE.Vector3(-0.18, 0.14, 0.20)
+        },
+        {
+          id: 'wm-parietal',
+          hub: 'Pz',
+          title: '顶叶 IPS · 认知整合与 P300 更新',
+          sub: 'P3 / Pz / P4 · 额顶工作记忆网络枢纽',
+          offset: new THREE.Vector3(0.0, 0.22, -0.18)
+        },
+        {
+          id: 'wm-cda',
+          hub: 'P6',
+          title: '枕顶区 · 视觉工作记忆容量 (CDA)',
+          sub: 'P5 / P6 / PO7 / PO8 · 编码 1–4 项记忆负载',
+          offset: new THREE.Vector3(-0.20, 0.08, -0.18)
+        }
+      ];
+
+      const cognitiveCalloutEntries = COGNITIVE_CALLOUTS.map(cfg => {
+        const hubEntry = electrodeRegistry[cfg.hub];
+        const anchorPos = hubEntry.pos.clone().add(cfg.offset);
+        const normal = hubEntry.normal.clone();
+        const el = document.createElement('button');
+        el.className = 'wm-callout';
+        el.innerHTML = `<span class="wm-callout-dot"></span><span><strong class="font-semibold">${escapeHtml(cfg.title)}</strong> <span class="text-amber-300/80 font-mono text-[10px]">[${cfg.hub}]</span></span>`;
+        el.title = cfg.sub;
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectElectrode(cfg.hub, true, true);
+        });
+        labelsLayer.appendChild(el);
+        return { cfg, anchorPos, normal, el, screenX: 0, screenY: 0, opacity: 1, visible: false };
+      });
+
+      // Frontoparietal Working Memory Network 3D Connectivity Arcs (额-顶工作记忆环路)
+      const wmNetworkGroup = new THREE.Group();
+      brainRoot.add(wmNetworkGroup);
+      const WM_NETWORK_PAIRS = [
+        ['F3', 'P3'], // Left Frontoparietal WM pathway
+        ['F4', 'P4'], // Right Frontoparietal WM pathway
+        ['Fz', 'Pz'], // Midline Executive-Parietal axis
+        ['F3', 'F4'], // Bilateral Prefrontal coupling
+        ['P3', 'P4']  // Bilateral Parietal coupling
+      ];
+
+      function buildWmNetworkArcs() {
+        WM_NETWORK_PAIRS.forEach(([aId, bId]) => {
+          const a = electrodeRegistry[aId];
+          const b = electrodeRegistry[bId];
+          if (!a || !b) return;
+          const pts = [];
+          const steps = 36;
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const p = new THREE.Vector3().lerpVectors(a.pos, b.pos, t);
+            const normE = new THREE.Vector3(p.x / SCALP_RX, p.y / SCALP_RY, p.z / SCALP_RZ).normalize();
+            const lift = 1.02 + Math.sin(t * Math.PI) * 0.065;
+            p.set(normE.x * SCALP_RX * lift, normE.y * SCALP_RY * lift, normE.z * SCALP_RZ * lift);
+            pts.push(p);
+          }
+          const line = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(pts),
+            new THREE.LineDashedMaterial({
+              color: 0xfbbf24,
+              dashSize: 0.055,
+              gapSize: 0.035,
+              transparent: true,
+              opacity: 0.55
+            })
+          );
+          line.computeLineDistances();
+          wmNetworkGroup.add(line);
+        });
+      }
+      buildWmNetworkArcs();
+
+      function updateWmNetworkVisibility() {
+        const isWmFilter = activeNetwork === 'wm';
+        wmNetworkGroup.visible = isWmFilter || showCognitiveCallouts;
+        wmNetworkGroup.children.forEach(line => {
+          line.material.opacity = isWmFilter ? 0.85 : 0.28;
+        });
+      }
+      updateWmNetworkVisibility();
+
+      function updateDynamicVisuals(selectedEntry, pairedEntry) {
+        while (dynamicVisualsGroup.children.length > 0) {
+          const child = dynamicVisualsGroup.children[0];
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) child.material.dispose();
+          dynamicVisualsGroup.remove(child);
+        }
+        activeSpotMesh = null;
+        if (!selectedEntry) return;
+
+        // 1. Primary Cortical Projection Line & Spot
+        const beamGeo = new THREE.BufferGeometry().setFromPoints([selectedEntry.pos.clone(), selectedEntry.cortexPos.clone()]);
+        dynamicVisualsGroup.add(new THREE.Line(
+          beamGeo,
+          new THREE.LineBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.92 })
+        ));
+
+        const spotMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(0.036, 16, 16),
+          new THREE.MeshBasicMaterial({ color: 0x22d3ee, transparent: true, opacity: 0.88 })
+        );
+        spotMesh.position.copy(selectedEntry.cortexPos);
+        dynamicVisualsGroup.add(spotMesh);
+        activeSpotMesh = spotMesh;
+
+        // 2. Contralateral Symmetry Arc & Secondary Cortical Projection
+        if (pairedEntry) {
+          const pairBeamGeo = new THREE.BufferGeometry().setFromPoints([pairedEntry.pos.clone(), pairedEntry.cortexPos.clone()]);
+          dynamicVisualsGroup.add(new THREE.Line(
+            pairBeamGeo,
+            new THREE.LineBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.65 })
+          ));
+
+          const pairSpot = new THREE.Mesh(
+            new THREE.SphereGeometry(0.028, 14, 14),
+            new THREE.MeshBasicMaterial({ color: 0xc084fc, transparent: true, opacity: 0.72 })
+          );
+          pairSpot.position.copy(pairedEntry.cortexPos);
+          dynamicVisualsGroup.add(pairSpot);
+
+          const arcPts = [];
+          const steps = 40;
+          for (let i = 0; i <= steps; i++) {
+            const t = i / steps;
+            const p = new THREE.Vector3().lerpVectors(selectedEntry.pos, pairedEntry.pos, t);
+            const normEllip = new THREE.Vector3(p.x / SCALP_RX, p.y / SCALP_RY, p.z / SCALP_RZ).normalize();
+            const archLift = 1.03 + Math.sin(t * Math.PI) * 0.08;
+            p.set(
+              normEllip.x * SCALP_RX * archLift,
+              normEllip.y * SCALP_RY * archLift,
+              normEllip.z * SCALP_RZ * archLift
+            );
+            arcPts.push(p);
+          }
+          const arcLine = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints(arcPts),
+            new THREE.LineDashedMaterial({
+              color: 0xc084fc,
+              dashSize: 0.05,
+              gapSize: 0.03,
+              transparent: true,
+              opacity: 0.9
+            })
+          );
+          arcLine.computeLineDistances();
+          dynamicVisualsGroup.add(arcLine);
+        }
+      }
+
+      // =========================================================================
+      // 4. SMOOTH SPHERICAL CAMERA TRANSITIONS
+      // =========================================================================
+      function startCameraTransition(targetPos) {
+        controls.autoRotate = false;
+        updateAutoRotateBtn();
+        const startOffset = camera.position.clone().sub(controls.target);
+        const endOffset = targetPos.clone().sub(controls.target);
+        camTransition = {
+          startDir: startOffset.clone().normalize(),
+          endDir: endOffset.clone().normalize(),
+          startRadius: startOffset.length(),
+          endRadius: endOffset.length(),
+          t: 0
+        };
+      }
+
+      function focusCameraOnElectrode(id) {
+        const entry = electrodeRegistry[id];
+        if (!entry) return;
+        const toCamVec = camera.position.clone().sub(entry.pos).normalize();
+        const facing = entry.normal.dot(toCamVec);
+        // Only smoothly orbit if the selected electrode is facing away or near the horizon
+        if (facing < 0.25) {
+          const dist = Math.max(3.6, Math.min(4.6, camera.position.distanceTo(controls.target)));
+          const desiredDir = entry.normal.clone().lerp(new THREE.Vector3(0, 0.35, 0), 0.15).normalize();
+          const targetPos = controls.target.clone().addScaledVector(desiredDir, dist);
+          startCameraTransition(targetPos);
+        }
+      }
+
+      // =========================================================================
+      // 5. APPLICATION STATE, SELECTION & UI INSPECTOR UPDATER
+      // =========================================================================
+      let selectedId = 'P3';
+      let hoveredId = null;
+      let activeNetwork = 'all';
+      let labelMode = 'all'; // 'all' | 'highlight' | 'hidden'
+
+      function refreshElectrodeMaterials() {
+        const selEntry = electrodeRegistry[selectedId];
+        const pairId = selEntry && selEntry.data.pair ? selEntry.data.pair : null;
+
+        Object.values(electrodeRegistry).forEach(entry => {
+          const id = entry.data.id;
+          const isSelected = id === selectedId;
+          const isPaired = id === pairId;
+          const isHovered = id === hoveredId;
+          const matchesNetwork = activeNetwork !== 'all' && entry.data.networks.includes(activeNetwork);
+
+          entry.labelEl.classList.remove('is-selected', 'is-paired', 'is-filtered');
+
+          if (isSelected) {
+            entry.group.scale.setScalar(1.48);
+            entry.capMesh.material.color.setHex(0x67e8f9);
+            entry.capMesh.material.emissive.setHex(0x06b6d4);
+            entry.capMesh.material.emissiveIntensity = 1.4;
+            entry.haloMesh.material.color.setHex(0x22d3ee);
+            entry.haloMesh.material.opacity = 0.9;
+            entry.labelEl.classList.add('is-selected');
+          } else if (isPaired) {
+            entry.group.scale.setScalar(1.26);
+            entry.capMesh.material.color.setHex(0xd8b4fe);
+            entry.capMesh.material.emissive.setHex(0x9333ea);
+            entry.capMesh.material.emissiveIntensity = 1.1;
+            entry.haloMesh.material.color.setHex(0xc084fc);
+            entry.haloMesh.material.opacity = 0.75;
+            entry.labelEl.classList.add('is-paired');
+          } else if (matchesNetwork) {
+            entry.group.scale.setScalar(isHovered ? 1.32 : 1.18);
+            entry.capMesh.material.color.setHex(0x34d399);
+            entry.capMesh.material.emissive.setHex(0x059669);
+            entry.capMesh.material.emissiveIntensity = 0.95;
+            entry.haloMesh.material.color.setHex(0x10b981);
+            entry.haloMesh.material.opacity = 0.45;
+            entry.labelEl.classList.add('is-filtered');
+          } else {
+            const dimmed = activeNetwork !== 'all';
+            entry.group.scale.setScalar(isHovered ? 1.28 : (dimmed ? 0.85 : 1.0));
+            entry.capMesh.material.color.setHex(isHovered ? 0x38bdf8 : (dimmed ? 0x475569 : 0xcbd5e1));
+            entry.capMesh.material.emissive.setHex(isHovered ? 0x0284c7 : 0x0f172a);
+            entry.capMesh.material.emissiveIntensity = isHovered ? 0.9 : 0.25;
+            entry.haloMesh.material.opacity = isHovered ? 0.5 : 0.0;
+          }
+        });
+
+        updateDynamicVisuals(selEntry, pairId ? electrodeRegistry[pairId] : null);
+      }
+
+      function selectElectrode(id, openMobileDrawer = false, autoFocusCamera = false) {
+        const data = ELECTRODE_MAP[id];
+        if (!data) return;
+        selectedId = id;
+
+        const lobeInfo = LOBE_META[data.lobeKey];
+        document.getElementById('insp-badge').textContent = data.id;
+        document.getElementById('mobile-toggle-badge').textContent = data.id;
+
+        const lobeEl = document.getElementById('insp-lobe');
+        lobeEl.textContent = lobeInfo.label;
+        lobeEl.className = `text-xs font-semibold px-2 py-0.5 rounded-md border ${lobeInfo.badgeClass}`;
+
+        const systemTag = CORE_10_20_SET.has(data.id) ? '10-20 核心导联' : '10-10 扩展导联';
+        const hemiText = (data.phi === 0 || Math.abs(data.phi) === 180)
+          ? `正中线 · ${systemTag}`
+          : `${data.phi < 0 ? '左半球' : '右半球'} · ${systemTag}`;
+        document.getElementById('insp-hemisphere').textContent = hemiText;
+        document.getElementById('insp-title').textContent = data.cortex.split('(')[0].trim();
+        document.getElementById('insp-anatomy').textContent = data.cortex;
+        document.getElementById('insp-coords').textContent = `θ=${data.theta}°, φ=${data.phi}°`;
+
+        const jumpBtn = document.getElementById('btn-jump-pair');
+        const pairText = document.getElementById('pair-label-text');
+        if (data.pair) {
+          pairText.textContent = '对侧同源对称电极 (Contralateral Pair)';
+          jumpBtn.textContent = `切换至 ${data.pair} ⇄`;
+          jumpBtn.classList.remove('hidden');
+          jumpBtn.onclick = () => selectElectrode(data.pair, false, true);
+        } else {
+          pairText.textContent = '正中线导联 (Midline Sagittal Electrode)';
+          jumpBtn.classList.add('hidden');
+        }
+
+        const tagsContainer = document.getElementById('insp-tags');
+        tagsContainer.innerHTML = data.functions.map(fn => `
+          <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-cyan-500/15 text-cyan-200 border border-cyan-400/30">
+            ${escapeHtml(fn)}
+          </span>
+        `).join('');
+
+        // Properly render **bold** highlights instead of raw markdown asterisks
+        document.getElementById('insp-summary').innerHTML = formatRichText(data.summary);
+
+        const erpsContainer = document.getElementById('insp-erps');
+        erpsContainer.innerHTML = data.erps.map(erp => `
+          <div class="rounded-xl bg-slate-900/75 border border-slate-800 p-2.5">
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <span class="text-xs font-bold text-amber-300">${escapeHtml(erp.name)}</span>
+              <span class="font-mono text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-200 border border-amber-400/30 shrink-0">
+                ${escapeHtml(erp.window)}
+              </span>
+            </div>
+            <p class="text-[11px] text-slate-300 leading-relaxed">${formatRichText(erp.desc)}</p>
+          </div>
+        `).join('');
+
+        document.getElementById('insp-bci').innerHTML = formatRichText(data.bci);
+
+        // Reset inspector scroll to top when switching electrodes
+        document.getElementById('inspector-scroll').scrollTop = 0;
+
+        document.querySelectorAll('.landmark-chip').forEach(btn => {
+          if (btn.dataset.id === id) {
+            btn.className = 'landmark-chip font-mono text-xs font-bold px-2.5 py-1 rounded-lg bg-cyan-500 text-slate-950 shrink-0 cursor-pointer';
+          } else {
+            btn.className = 'landmark-chip font-mono text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 shrink-0 cursor-pointer';
+          }
+        });
+
+        if (openMobileDrawer && window.innerWidth < 1024) {
+          document.getElementById('inspector-panel').classList.remove('translate-y-full');
+        }
+
+        if (autoFocusCamera) {
+          focusCameraOnElectrode(id);
+        }
+
+        refreshElectrodeMaterials();
+      }
+
+      // Populate Quick Landmark Chips
+      const LANDMARKS = ['P3', 'P4', 'C3', 'C4', 'Fz', 'FCz', 'Cz', 'Pz', 'Oz', 'F7', 'T7', 'P8'];
+      const quickLandmarksEl = document.getElementById('quick-landmarks');
+      LANDMARKS.forEach(id => {
+        const btn = document.createElement('button');
+        btn.dataset.id = id;
+        btn.textContent = id;
+        btn.className = 'landmark-chip font-mono text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 border border-slate-700 shrink-0 cursor-pointer';
+        btn.addEventListener('click', () => selectElectrode(id, false, true));
+        quickLandmarksEl.appendChild(btn);
+      });
+
+      // =========================================================================
+      // 6. RAYCASTING (HOVER & CLICK ON 3D ELECTRODES)
+      // =========================================================================
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+      let pointerDownPos = { x: 0, y: 0 };
+
+      renderer.domElement.addEventListener('pointerdown', (e) => {
+        pointerDownPos = { x: e.clientX, y: e.clientY };
+      });
+
+      renderer.domElement.addEventListener('pointermove', (e) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects(electrodeMeshes, false);
+        const newHover = hits.length > 0 ? hits[0].object.userData.electrodeId : null;
+
+        if (newHover !== hoveredId) {
+          hoveredId = newHover;
+          renderer.domElement.style.cursor = hoveredId ? 'pointer' : 'grab';
+          refreshElectrodeMaterials();
+        }
+      });
+
+      renderer.domElement.addEventListener('pointerup', (e) => {
+        const dist = Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y);
+        if (dist > 6) return;
+
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects(electrodeMeshes, false);
+        if (hits.length > 0) {
+          selectElectrode(hits[0].object.userData.electrodeId, true, false);
+        }
+      });
+
+      // =========================================================================
+      // 7. INTERACTIVE UI CONTROLS (SEARCH, FILTERS, CAMERA VIEWS, EXPORT PNG)
+      // =========================================================================
+      document.querySelectorAll('.net-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          activeNetwork = btn.dataset.net;
+          document.querySelectorAll('.net-btn').forEach(b => {
+            if (b === btn) {
+              b.className = 'net-btn active px-3 py-1.5 rounded-lg text-xs font-medium bg-cyan-500/25 text-cyan-200 border border-cyan-400/50 whitespace-nowrap transition cursor-pointer';
+            } else {
+              b.className = 'net-btn px-3 py-1.5 rounded-lg text-xs font-medium glass-panel text-slate-300 hover:text-white whitespace-nowrap transition cursor-pointer';
+            }
+          });
+          updateWmNetworkVisibility();
+          refreshElectrodeMaterials();
+        });
+      });
+
+      // Full-text Electrode & ERP Instant Search
+      const searchInput = document.getElementById('electrode-search');
+      const searchResults = document.getElementById('search-results');
+      let currentSearchMatches = [];
+
+      searchInput.addEventListener('input', () => {
+        const q = searchInput.value.trim().toLowerCase();
+        if (!q) {
+          searchResults.classList.add('hidden');
+          currentSearchMatches = [];
+          return;
+        }
+        // Rank exact / prefix ID matches first, then full-text (cortex, functions, ERP, BCI)
+        currentSearchMatches = ELECTRODES_DATA
+          .filter(e => e._searchText.includes(q))
+          .sort((a, b) => {
+            const aId = a.id.toLowerCase();
+            const bId = b.id.toLowerCase();
+            const aScore = aId === q ? 3 : (aId.startsWith(q) ? 2 : (aId.includes(q) ? 1 : 0));
+            const bScore = bId === q ? 3 : (bId.startsWith(q) ? 2 : (bId.includes(q) ? 1 : 0));
+            return bScore - aScore;
+          })
+          .slice(0, 10);
+
+        if (currentSearchMatches.length === 0) {
+          searchResults.innerHTML = `<div class="px-3 py-2.5 text-xs text-slate-400">未找到匹配导联或 ERP 成分</div>`;
+        } else {
+          searchResults.innerHTML = currentSearchMatches.map(m => `
+            <button data-id="${m.id}" class="search-item w-full text-left px-3 py-2 hover:bg-cyan-500/20 flex items-center justify-between gap-2 transition cursor-pointer">
+              <div class="truncate">
+                <span class="font-mono font-bold text-xs text-cyan-300 mr-1.5">${escapeHtml(m.id)}</span>
+                <span class="text-[11px] text-slate-300">${escapeHtml(m.cortex.split('(')[0].trim())}</span>
+              </div>
+              <span class="text-[10px] text-slate-400 shrink-0">${escapeHtml(LOBE_META[m.lobeKey].label.split(' ')[0])}</span>
+            </button>
+          `).join('');
+          searchResults.querySelectorAll('.search-item').forEach(itemBtn => {
+            itemBtn.addEventListener('click', () => {
+              selectElectrode(itemBtn.dataset.id, true, true);
+              searchInput.value = '';
+              searchResults.classList.add('hidden');
+            });
+          });
+        }
+        searchResults.classList.remove('hidden');
+      });
+
+      searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && currentSearchMatches.length > 0) {
+          selectElectrode(currentSearchMatches[0].id, true, true);
+          searchInput.value = '';
+          searchResults.classList.add('hidden');
+          searchInput.blur();
+        } else if (e.key === 'Escape') {
+          searchResults.classList.add('hidden');
+          searchInput.blur();
+        }
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !searchResults.contains(e.target)) {
+          searchResults.classList.add('hidden');
+        }
+      });
+
+      // Camera Smooth View Presets
+      const VIEW_PRESETS = {
+        top:   new THREE.Vector3(0, 4.1, -0.01),
+        left:  new THREE.Vector3(4.0, 0.4, 0),
+        right: new THREE.Vector3(-4.0, 0.4, 0),
+        front: new THREE.Vector3(0, 0.5, 4.1),
+        back:  new THREE.Vector3(0, 0.6, -4.1)
+      };
+
+      document.querySelectorAll('.view-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const preset = VIEW_PRESETS[btn.dataset.view];
+          if (preset) startCameraTransition(preset);
+        });
+      });
+
+      const btnAutoRotate = document.getElementById('btn-autorotate');
+      function updateAutoRotateBtn() {
+        if (controls.autoRotate) {
+          btnAutoRotate.className = 'px-2 py-1 rounded-md text-[11px] font-medium bg-cyan-500/30 text-cyan-200 border border-cyan-400/50 transition cursor-pointer';
+        } else {
+          btnAutoRotate.className = 'px-2 py-1 rounded-md text-[11px] font-medium bg-slate-800/80 hover:bg-cyan-500/25 text-slate-300 border border-slate-700/70 transition cursor-pointer';
+        }
+      }
+      btnAutoRotate.addEventListener('click', () => {
+        controls.autoRotate = !controls.autoRotate;
+        camTransition = null;
+        updateAutoRotateBtn();
+      });
+
+      // Keyboard Shortcuts (ignored when typing in inputs)
+      document.addEventListener('keydown', (e) => {
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+        if (e.key === '/') {
+          e.preventDefault();
+          searchInput.focus();
+        } else if (e.key === 'Escape') {
+          document.getElementById('inspector-panel').classList.add('translate-y-full');
+        } else if (e.code === 'Space') {
+          e.preventDefault();
+          controls.autoRotate = !controls.autoRotate;
+          camTransition = null;
+          updateAutoRotateBtn();
+        } else if (e.key === '1') {
+          startCameraTransition(VIEW_PRESETS.top);
+        } else if (e.key === '2') {
+          startCameraTransition(VIEW_PRESETS.left);
+        } else if (e.key === '3') {
+          startCameraTransition(VIEW_PRESETS.right);
+        } else if (e.key === '4') {
+          startCameraTransition(VIEW_PRESETS.front);
+        } else if (e.key === '5') {
+          startCameraTransition(VIEW_PRESETS.back);
+        }
+      });
+
+      // Scalp Opacity Slider
+      document.getElementById('scalp-opacity').addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        scalpMat.opacity = val;
+        scalpMesh.visible = val > 0.005;
+        landmarkMat.opacity = Math.max(0.10, Math.min(0.45, val * 1.35));
+      });
+
+      // Cognitive & Working Memory Callouts Toggle
+      const btnWmCallouts = document.getElementById('btn-wm-callouts');
+      btnWmCallouts.addEventListener('click', () => {
+        showCognitiveCallouts = !showCognitiveCallouts;
+        if (showCognitiveCallouts) {
+          btnWmCallouts.textContent = '认知标注: 开';
+          btnWmCallouts.className = 'px-2 py-1.5 rounded-lg font-medium bg-amber-500/20 text-amber-200 border border-amber-400/40 hover:bg-amber-500/30 transition cursor-pointer text-center whitespace-nowrap';
+        } else {
+          btnWmCallouts.textContent = '认知标注: 关';
+          btnWmCallouts.className = 'px-2 py-1.5 rounded-lg font-medium bg-slate-800/90 text-slate-300 border border-slate-700 hover:border-slate-500 transition cursor-pointer text-center whitespace-nowrap';
+        }
+        updateWmNetworkVisibility();
+      });
+
+      // Lobe Color Toggle
+      const btnLobeColor = document.getElementById('btn-lobe-color');
+      const lobeLegend = document.getElementById('lobe-legend');
+      btnLobeColor.addEventListener('click', () => {
+        isLobeColorEnabled = !isLobeColorEnabled;
+        hemisphereGeometries.forEach(geo => {
+          const src = isLobeColorEnabled ? geo.userData.lobeColors : geo.userData.tissueColors;
+          geo.attributes.color.array.set(src);
+          geo.attributes.color.needsUpdate = true;
+        });
+        if (isLobeColorEnabled) {
+          btnLobeColor.textContent = '脑叶分区: 开';
+          btnLobeColor.className = 'px-2.5 py-1.5 rounded-lg font-medium bg-purple-500/20 text-purple-200 border border-purple-400/40 hover:bg-purple-500/30 transition cursor-pointer text-center';
+          lobeLegend.classList.remove('hidden');
+        } else {
+          btnLobeColor.textContent = '脑叶分区: 关';
+          btnLobeColor.className = 'px-2.5 py-1.5 rounded-lg font-medium bg-slate-800/90 text-slate-300 border border-slate-700 hover:border-slate-500 transition cursor-pointer text-center';
+          lobeLegend.classList.add('hidden');
+        }
+      });
+
+      // Label Mode Cycle ('all' -> 'highlight' -> 'hidden')
+      const btnLabelMode = document.getElementById('btn-label-mode');
+      btnLabelMode.addEventListener('click', () => {
+        if (labelMode === 'all') {
+          labelMode = 'highlight';
+          btnLabelMode.textContent = '标签: 仅高亮';
+        } else if (labelMode === 'highlight') {
+          labelMode = 'hidden';
+          btnLabelMode.textContent = '标签: 隐藏';
+        } else {
+          labelMode = 'all';
+          btnLabelMode.textContent = '标签: 全部';
+        }
+      });
+
+      // Mobile Inspector Drawer Toggles
+      document.getElementById('mobile-inspector-toggle').addEventListener('click', () => {
+        document.getElementById('inspector-panel').classList.remove('translate-y-full');
+      });
+      document.getElementById('close-inspector-mobile').addEventListener('click', () => {
+        document.getElementById('inspector-panel').classList.add('translate-y-full');
+      });
+
+      // Toast Helper
+      function showToast(msg) {
+        const toast = document.getElementById('toast-msg');
+        toast.textContent = msg;
+        toast.classList.remove('opacity-0');
+        clearTimeout(toast._timer);
+        toast._timer = setTimeout(() => {
+          toast.classList.add('opacity-0');
+        }, 2600);
+      }
+
+      // Cross-browser rounded rect helper for Canvas 2D
+      function drawRoundedRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+          ctx.roundRect(x, y, w, h, r);
+        } else {
+          ctx.moveTo(x + r, y);
+          ctx.lineTo(x + w - r, y);
+          ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+          ctx.lineTo(x + w, y + h - r);
+          ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+          ctx.lineTo(x + r, y + h);
+          ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+          ctx.lineTo(x, y + r);
+          ctx.quadraticCurveTo(x, y, x + r, y);
+          ctx.closePath();
+        }
+      }
+
+      // Export Publication-Grade High-DPI PNG (WebGL + 2D Electrode Labels + L/R Badges)
+      document.getElementById('btn-export-png').addEventListener('click', () => {
+        try {
+          renderer.render(scene, camera);
+          const srcCanvas = renderer.domElement;
+          const outCanvas = document.createElement('canvas');
+          outCanvas.width = srcCanvas.width;
+          outCanvas.height = srcCanvas.height;
+          const ctx = outCanvas.getContext('2d');
+          const dpr = renderer.getPixelRatio();
+
+          const grad = ctx.createRadialGradient(
+            outCanvas.width * 0.45, outCanvas.height * 0.48, 20,
+            outCanvas.width * 0.5, outCanvas.height * 0.5, outCanvas.width * 0.65
+          );
+          grad.addColorStop(0, '#152238');
+          grad.addColorStop(0.65, '#0b1120');
+          grad.addColorStop(1, '#060a14');
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+
+          ctx.drawImage(srcCanvas, 0, 0);
+
+          // Draw Anatomical L/R Badges
+          sideMarkers.forEach(m => {
+            if (!m.visible) return;
+            const x = m.screenX * dpr;
+            const y = m.screenY * dpr;
+            ctx.save();
+            ctx.font = `700 ${Math.round(11 * dpr)}px "Inter", sans-serif`;
+            const tw = ctx.measureText(m.text).width;
+            const bw = tw + 14 * dpr;
+            const bh = 20 * dpr;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.82)';
+            ctx.strokeStyle = 'rgba(34, 211, 238, 0.45)';
+            ctx.lineWidth = 1.2 * dpr;
+            drawRoundedRect(ctx, x - bw / 2, y - bh / 2, bw, bh, 5 * dpr);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#67e8f9';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(m.text, x, y + 0.5 * dpr);
+            ctx.restore();
+          });
+
+          // Draw Visible Projected Electrode Labels
+          const selEntry = electrodeRegistry[selectedId];
+          const pairId = selEntry && selEntry.data.pair ? selEntry.data.pair : null;
+
+          Object.values(electrodeRegistry).forEach(entry => {
+            if (!entry.isVisible || entry.labelOpacity < 0.25) return;
+
+            const x = entry.screenX * dpr;
+            const y = entry.screenY * dpr - 14 * dpr;
+            const id = entry.data.id;
+            const isSel = id === selectedId;
+            const isPair = id === pairId;
+
+            ctx.save();
+            ctx.globalAlpha = entry.labelOpacity;
+            ctx.font = `${isSel || isPair ? 'bold' : '600'} ${Math.round((isSel ? 12 : 11) * dpr)}px "JetBrains Mono", monospace`;
+            const textW = ctx.measureText(id).width;
+            const padX = 6 * dpr;
+            const boxW = textW + padX * 2;
+            const boxH = 18 * dpr;
+
+            ctx.fillStyle = isSel ? '#0284c7' : (isPair ? '#7c3aed' : 'rgba(15, 23, 42, 0.82)');
+            ctx.strokeStyle = isSel ? '#a5f3fc' : (isPair ? '#ddd6fe' : 'rgba(148, 163, 184, 0.35)');
+            ctx.lineWidth = 1.2 * dpr;
+
+            drawRoundedRect(ctx, x - boxW / 2, y - boxH / 2, boxW, boxH, 5 * dpr);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(id, x, y + 0.5 * dpr);
+            ctx.restore();
+          });
+
+          // Draw Visible Cognitive & Working Memory Callouts
+          cognitiveCalloutEntries.forEach(c => {
+            if (!c.visible || c.opacity < 0.25) return;
+            const x = c.screenX * dpr;
+            const y = c.screenY * dpr;
+            const text = `${c.cfg.title} [${c.cfg.hub}]`;
+            ctx.save();
+            ctx.globalAlpha = c.opacity;
+            ctx.font = `600 ${Math.round(11 * dpr)}px "Inter", sans-serif`;
+            const tw = ctx.measureText(text).width;
+            const bw = tw + 18 * dpr;
+            const bh = 22 * dpr;
+            ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+            ctx.strokeStyle = 'rgba(251, 191, 36, 0.65)';
+            ctx.lineWidth = 1.2 * dpr;
+            drawRoundedRect(ctx, x - bw / 2, y - bh / 2, bw, bh, 7 * dpr);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#fef3c7';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y + 0.5 * dpr);
+            ctx.restore();
+          });
+
+          // Subtle Figure Caption Stamp
+          ctx.save();
+          ctx.fillStyle = 'rgba(226, 232, 240, 0.85)';
+          ctx.font = `600 ${Math.round(13 * dpr)}px "Inter", sans-serif`;
+          ctx.fillText(`64-Channel 10-10 EEG Cortical Atlas · Active: ${selectedId}${pairId ? ' ↔ ' + pairId : ''}`, 24 * dpr, outCanvas.height - 22 * dpr);
+          ctx.restore();
+
+          const link = document.createElement('a');
+          link.download = `EEG_64Ch_3D_Atlas_${selectedId}.png`;
+          link.href = outCanvas.toDataURL('image/png');
+          link.click();
+          showToast(`✅ 已导出高清图谱 PNG (${selectedId})`);
+        } catch (err) {
+          showToast('导出截图时遇到浏览器限制，请尝试系统截图');
+        }
+      });
+
+      // =========================================================================
+      // 8. 2D LABEL PROJECTION (GPU translate3d) & MAIN ANIMATION LOOP
+      // =========================================================================
+      const projVec = new THREE.Vector3();
+      const worldPos = new THREE.Vector3();
+      const worldNorm = new THREE.Vector3();
+      const toCam = new THREE.Vector3();
+      const slerpDir = new THREE.Vector3();
+      const slerpAxis = new THREE.Vector3();
+      const slerpQuat = new THREE.Quaternion();
+
+      function updateProjectedLabels() {
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        const selEntry = electrodeRegistry[selectedId];
+        const pairId = selEntry && selEntry.data.pair ? selEntry.data.pair : null;
+
+        // Project Anatomical L / R Orientation Badges
+        sideMarkers.forEach(m => {
+          projVec.copy(m.pos).project(camera);
+          if (projVec.z > 1) {
+            m.visible = false;
+            m.el.style.display = 'none';
+          } else {
+            m.visible = true;
+            m.screenX = (projVec.x * 0.5 + 0.5) * width;
+            m.screenY = (-projVec.y * 0.5 + 0.5) * height;
+            m.el.style.display = 'block';
+            m.el.style.transform = `translate3d(${m.screenX.toFixed(1)}px, ${m.screenY.toFixed(1)}px, 0) translate(-50%, -50%)`;
+          }
+        });
+
+        // Project Cognitive & Working Memory 3D Callout Badges
+        const showWmNow = showCognitiveCallouts || activeNetwork === 'wm';
+        cognitiveCalloutEntries.forEach(c => {
+          if (!showWmNow) {
+            c.visible = false;
+            c.el.style.display = 'none';
+            return;
+          }
+          toCam.copy(camera.position).sub(c.anchorPos).normalize();
+          const facing = c.normal.dot(toCam);
+          projVec.copy(c.anchorPos).project(camera);
+          if (projVec.z > 1 || facing < -0.10) {
+            c.visible = false;
+            c.el.style.display = 'none';
+            return;
+          }
+          c.screenX = (projVec.x * 0.5 + 0.5) * width;
+          c.screenY = (-projVec.y * 0.5 + 0.5) * height;
+          c.opacity = Math.min(1, 0.45 + facing * 0.85);
+          c.visible = true;
+          c.el.style.display = 'flex';
+          c.el.style.opacity = c.opacity.toFixed(2);
+          c.el.style.zIndex = '48';
+          c.el.style.transform = `translate3d(${c.screenX.toFixed(1)}px, ${c.screenY.toFixed(1)}px, 0) translate(-50%, -50%)`;
+        });
+
+        Object.values(electrodeRegistry).forEach(entry => {
+          const id = entry.data.id;
+          const isImportant =
+            id === selectedId ||
+            id === pairId ||
+            id === hoveredId ||
+            (activeNetwork !== 'all' && entry.data.networks.includes(activeNetwork));
+
+          if (labelMode === 'hidden' || (labelMode === 'highlight' && !isImportant)) {
+            entry.isVisible = false;
+            entry.labelEl.style.display = 'none';
+            return;
+          }
+
+          entry.group.getWorldPosition(worldPos);
+          worldNorm.copy(entry.normal).applyQuaternion(brainRoot.quaternion).normalize();
+          toCam.copy(camera.position).sub(worldPos).normalize();
+          const facing = worldNorm.dot(toCam);
+
+          projVec.copy(worldPos).project(camera);
+          if (projVec.z > 1) {
+            entry.isVisible = false;
+            entry.labelEl.style.display = 'none';
+            return;
+          }
+
+          const sx = (projVec.x * 0.5 + 0.5) * width;
+          const sy = (-projVec.y * 0.5 + 0.5) * height;
+          entry.screenX = sx;
+          entry.screenY = sy;
+          entry.isVisible = true;
+
+          entry.labelEl.style.display = 'block';
+          entry.labelEl.style.transform = `translate3d(${sx.toFixed(1)}px, ${sy.toFixed(1)}px, 0) translate(-50%, -135%)`;
+
+          if (isImportant) {
+            entry.labelOpacity = facing < -0.15 ? 0.68 : 1;
+            entry.labelEl.style.opacity = entry.labelOpacity.toString();
+            entry.labelEl.style.zIndex = id === selectedId ? '50' : '40';
+            entry.labelEl.style.pointerEvents = 'auto';
+          } else if (facing < -0.05) {
+            entry.labelOpacity = 0.14;
+            entry.labelEl.style.opacity = '0.14';
+            entry.labelEl.style.zIndex = '5';
+            // Prevent back-facing ghost labels from intercepting clicks or drags
+            entry.labelEl.style.pointerEvents = 'none';
+          } else {
+            entry.labelOpacity = Math.min(1, 0.35 + facing * 0.85);
+            entry.labelEl.style.opacity = entry.labelOpacity.toFixed(2);
+            entry.labelEl.style.zIndex = Math.round(10 + facing * 20).toString();
+            entry.labelEl.style.pointerEvents = 'auto';
+          }
+        });
+      }
+
+      const clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const dt = Math.min(clock.getDelta(), 0.05);
+        const elapsed = clock.elapsedTime;
+
+        // Smooth frame-rate-independent spherical camera orbit transition
+        if (camTransition) {
+          camTransition.t = Math.min(1, camTransition.t + dt * 2.6);
+          const ease = 1 - Math.pow(1 - camTransition.t, 3); // cubic ease-out
+
+          const dot = THREE.MathUtils.clamp(camTransition.startDir.dot(camTransition.endDir), -1, 1);
+          const angle = Math.acos(dot);
+          if (angle < 0.001) {
+            slerpDir.copy(camTransition.endDir);
+          } else {
+            slerpAxis.crossVectors(camTransition.startDir, camTransition.endDir);
+            if (slerpAxis.lengthSq() < 1e-6) {
+              // 180-degree opposite views (e.g. Front -> Back): orbit around Y axis
+              slerpAxis.set(0, 1, 0);
+            } else {
+              slerpAxis.normalize();
+            }
+            slerpQuat.setFromAxisAngle(slerpAxis, angle * ease);
+            slerpDir.copy(camTransition.startDir).applyQuaternion(slerpQuat).normalize();
+          }
+
+          const radius = THREE.MathUtils.lerp(camTransition.startRadius, camTransition.endRadius, ease);
+          camera.position.copy(controls.target).addScaledVector(slerpDir, radius);
+
+          if (camTransition.t >= 1) {
+            camTransition = null;
+          }
+        }
+
+        // Subtle breathing pulse on selected electrode halo & cortical projection spot
+        const selEntry = electrodeRegistry[selectedId];
+        if (selEntry) {
+          const pulse = 1.0 + Math.sin(elapsed * 4.2) * 0.16;
+          selEntry.haloMesh.scale.set(pulse, pulse, pulse);
+          if (activeSpotMesh) {
+            const spotPulse = 1.0 + Math.sin(elapsed * 4.2) * 0.12;
+            activeSpotMesh.scale.setScalar(spotPulse);
+          }
+        }
+
+        controls.update();
+        updateProjectedLabels();
+        renderer.render(scene, camera);
+      }
+
+      window.addEventListener('resize', updateCameraViewport);
+
+      // Start immediately (no blocking on external font stylesheets)
+      selectElectrode('P3', false, false);
+      animate();
+    })();
+  </script>
+</body>
+</html>
